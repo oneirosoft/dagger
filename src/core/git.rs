@@ -56,15 +56,23 @@ pub fn resolve_repo_context() -> io::Result<RepoContext> {
 }
 
 pub fn current_branch_name() -> io::Result<String> {
-    let branch_name = read_git_stdout(["branch", "--show-current"])?;
-
-    if branch_name.is_empty() {
+    let Some(branch_name) = current_branch_name_if_any()? else {
         return Err(io::Error::other(
             "dig branch requires a named branch; detached HEAD is not supported",
         ));
-    }
+    };
 
     Ok(branch_name)
+}
+
+pub fn current_branch_name_if_any() -> io::Result<Option<String>> {
+    let branch_name = read_git_stdout(["branch", "--show-current"])?;
+
+    if branch_name.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(branch_name))
+    }
 }
 
 pub fn current_branch_name_or(default: &str) -> io::Result<String> {

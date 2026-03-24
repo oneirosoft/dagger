@@ -31,6 +31,9 @@ enum Commands {
 
     /// Wrap git commit with limited passthrough flags
     Commit(commit::CommitArgs),
+
+    /// Print the tracked branch stacks as a shared tree from trunk
+    Tree(tree::TreeArgs),
 }
 
 #[derive(Debug)]
@@ -46,6 +49,7 @@ pub fn run() -> ExitCode {
         Commands::Clean(args) => clean::execute(args),
         Commands::Init(args) => init::execute(args),
         Commands::Commit(args) => commit::execute(args),
+        Commands::Tree(args) => tree::execute(args),
     };
 
     exit_code_from_result(result)
