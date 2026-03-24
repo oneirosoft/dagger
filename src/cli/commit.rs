@@ -1,9 +1,9 @@
 use std::io;
-use std::io::Write;
 
 use clap::{ArgAction, Args};
 
 use crate::core::commit::{self, CommitEntry, CommitOptions, CommitOutcome};
+use crate::ui::markers;
 
 use super::CommandOutcome;
 
@@ -35,8 +35,6 @@ pub fn execute(args: CommitArgs) -> io::Result<CommandOutcome> {
         if !output.is_empty() {
             println!("{output}");
         }
-    } else {
-        print_process_output(&outcome)?;
     }
 
     Ok(CommandOutcome {
@@ -58,7 +56,6 @@ impl From<CommitArgs> for CommitOptions {
 const GREEN: &str = "\x1b[32m";
 const YELLOW: &str = "\x1b[33m";
 const RESET: &str = "\x1b[0m";
-const CHECKMARK: &str = "✓";
 
 fn format_commit_success_output(outcome: &CommitOutcome) -> String {
     let mut sections = Vec::new();
@@ -80,9 +77,9 @@ fn format_recent_commits(commits: &[CommitEntry]) -> String {
         .enumerate()
         .map(|(index, commit)| {
             let prefix = if index == 0 {
-                format!("{GREEN}{CHECKMARK}{RESET}")
+                format!("{GREEN}{}{RESET}", markers::HEAD)
             } else {
-                "*".to_string()
+                markers::LIST_ITEM.to_string()
             };
 
             format!(
@@ -92,18 +89,6 @@ fn format_recent_commits(commits: &[CommitEntry]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn print_process_output(outcome: &CommitOutcome) -> io::Result<()> {
-    if !outcome.stdout.is_empty() {
-        io::stdout().write_all(outcome.stdout.as_bytes())?;
-    }
-
-    if !outcome.stderr.is_empty() {
-        io::stderr().write_all(outcome.stderr.as_bytes())?;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -147,7 +132,7 @@ mod tests {
 
         assert_eq!(
             formatted,
-            "\u{1b}[32m✓\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m: latest commit\n* \u{1b}[33mdef5678\u{1b}[0m: older commit"
+            "\u{1b}[32m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m: latest commit\n* \u{1b}[33mdef5678\u{1b}[0m: older commit"
         );
     }
 
@@ -160,13 +145,11 @@ mod tests {
                 hash: "abc1234".into(),
                 title: "latest commit".into(),
             }],
-            stdout: String::new(),
-            stderr: String::new(),
         };
 
         assert_eq!(
             format_commit_success_output(&outcome),
-            "10 files changed, 2245 insertions(+)\n\n\u{1b}[32m✓\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m: latest commit"
+            "10 files changed, 2245 insertions(+)\n\n\u{1b}[32m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m: latest commit"
         );
     }
 }
