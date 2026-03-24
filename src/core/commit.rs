@@ -14,6 +14,8 @@ pub struct CommitOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitEntry {
     pub hash: String,
+    pub refs: Vec<String>,
+    pub is_head: bool,
     pub title: String,
 }
 
@@ -91,11 +93,11 @@ fn load_commit_summary_line() -> io::Result<Option<String>> {
 
 fn load_recent_commits(limit: usize) -> io::Result<Vec<CommitEntry>> {
     let output = Command::new("git")
-        .args(["log", "--oneline", "-n", &limit.to_string()])
+        .args(["log", "--decorate=short", "--oneline", "-n", &limit.to_string()])
         .output()?;
 
     if !output.status.success() {
-        return Err(io::Error::other("git log --oneline failed"));
+        return Err(io::Error::other("git log --decorate=short --oneline failed"));
     }
 
     let stdout =
@@ -113,19 +115,57 @@ fn parse_git_log_output(stdout: &str) -> Vec<CommitEntry> {
                 return None;
             }
 
-            let (hash, title) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
+            let (hash, remainder) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
+            let (is_head, refs, title) = parse_commit_metadata(remainder);
 
             Some(CommitEntry {
                 hash: hash.to_string(),
-                title: title.to_string(),
+                refs,
+                is_head,
+                title,
             })
         })
         .collect()
 }
 
+fn parse_commit_metadata(remainder: &str) -> (bool, Vec<String>, String) {
+    let trimmed = remainder.trim_start();
+
+    if let Some(decorated) = trimmed.strip_prefix('(') {
+        if let Some((decorations, title)) = decorated.split_once(") ") {
+            let (is_head, refs) = parse_decorations(decorations);
+            return (is_head, refs, title.to_string());
+        }
+    }
+
+    (false, Vec::new(), trimmed.to_string())
+}
+
+fn parse_decorations(decorations: &str) -> (bool, Vec<String>) {
+    let mut is_head = false;
+    let mut refs = Vec::new();
+
+    for decoration in decorations.split(',') {
+        let trimmed = decoration.trim();
+
+        if let Some(branch) = trimmed.strip_prefix("HEAD -> ") {
+            is_head = true;
+            refs.push(branch.to_string());
+        } else if trimmed == "HEAD" {
+            is_head = true;
+        } else if !trimmed.is_empty() {
+            refs.push(trimmed.to_string());
+        }
+    }
+
+    (is_head, refs)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_git_commit_args, parse_git_log_output, CommitEntry, CommitOptions};
+    use super::{
+        build_git_commit_args, parse_decorations, parse_git_log_output, CommitEntry, CommitOptions,
+    };
 
     #[test]
     fn builds_commit_command_with_supported_passthrough_flags() {
@@ -161,20 +201,32 @@ mod tests {
 
     #[test]
     fn parses_git_log_output_into_commit_entries() {
-        let log = "abc1234 first commit\n987fedc second commit\n";
+        let log = "abc1234 (HEAD -> main, tag: v0.1.0) first commit\n987fedc second commit\n";
 
         assert_eq!(
             parse_git_log_output(log),
             vec![
                 CommitEntry {
                     hash: "abc1234".into(),
+                    refs: vec!["main".into(), "tag: v0.1.0".into()],
+                    is_head: true,
                     title: "first commit".into(),
                 },
                 CommitEntry {
                     hash: "987fedc".into(),
+                    refs: Vec::new(),
+                    is_head: false,
                     title: "second commit".into(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn parses_head_and_tag_decorations() {
+        assert_eq!(
+            parse_decorations("HEAD -> main, tag: v0.1.0, origin/main"),
+            (true, vec!["main".into(), "tag: v0.1.0".into(), "origin/main".into()])
         );
     }
 }

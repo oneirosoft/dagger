@@ -74,21 +74,29 @@ fn format_commit_success_output(outcome: &CommitOutcome) -> String {
 fn format_recent_commits(commits: &[CommitEntry]) -> String {
     commits
         .iter()
-        .enumerate()
-        .map(|(index, commit)| {
-            let prefix = if index == 0 {
+        .map(|commit| {
+            let prefix = if commit.is_head {
                 format!("{GREEN}{}{RESET}", markers::HEAD)
             } else {
                 markers::LIST_ITEM.to_string()
             };
+            let refs = format_commit_refs(commit);
 
             format!(
-                "{prefix} {YELLOW}{}{RESET}: {}",
+                "{prefix} {YELLOW}{}{RESET}{refs}: {}",
                 commit.hash, commit.title
             )
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn format_commit_refs(commit: &CommitEntry) -> String {
+    if commit.refs.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", commit.refs.join(", "))
+    }
 }
 
 #[cfg(test)]
@@ -122,17 +130,21 @@ mod tests {
         let formatted = format_recent_commits(&[
             CommitEntry {
                 hash: "abc1234".into(),
+                refs: vec!["main".into(), "tag: v0.1.0".into()],
+                is_head: true,
                 title: "latest commit".into(),
             },
             CommitEntry {
                 hash: "def5678".into(),
+                refs: vec!["tag: v0.0.9".into()],
+                is_head: false,
                 title: "older commit".into(),
             },
         ]);
 
         assert_eq!(
             formatted,
-            "\u{1b}[32m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m: latest commit\n* \u{1b}[33mdef5678\u{1b}[0m: older commit"
+            "\u{1b}[32m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m (main, tag: v0.1.0): latest commit\n* \u{1b}[33mdef5678\u{1b}[0m (tag: v0.0.9): older commit"
         );
     }
 
@@ -143,13 +155,15 @@ mod tests {
             summary_line: Some("10 files changed, 2245 insertions(+)".into()),
             recent_commits: vec![CommitEntry {
                 hash: "abc1234".into(),
+                refs: vec!["main".into()],
+                is_head: true,
                 title: "latest commit".into(),
             }],
         };
 
         assert_eq!(
             format_commit_success_output(&outcome),
-            "10 files changed, 2245 insertions(+)\n\n\u{1b}[32m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m: latest commit"
+            "10 files changed, 2245 insertions(+)\n\n\u{1b}[32m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m (main): latest commit"
         );
     }
 }
