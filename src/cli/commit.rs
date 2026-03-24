@@ -4,6 +4,7 @@ use clap::{ArgAction, Args};
 
 use crate::core::commit::{self, CommitEntry, CommitOptions, CommitOutcome};
 use crate::ui::markers;
+use crate::ui::palette::Accent;
 
 use super::CommandOutcome;
 
@@ -53,10 +54,6 @@ impl From<CommitArgs> for CommitOptions {
     }
 }
 
-const GREEN: &str = "\x1b[32m";
-const YELLOW: &str = "\x1b[33m";
-const RESET: &str = "\x1b[0m";
-
 fn format_commit_success_output(outcome: &CommitOutcome) -> String {
     let mut sections = Vec::new();
 
@@ -76,15 +73,16 @@ fn format_recent_commits(commits: &[CommitEntry]) -> String {
         .iter()
         .map(|commit| {
             let prefix = if commit.is_head {
-                format!("{GREEN}{}{RESET}", markers::HEAD)
+                Accent::HeadMarker.paint_ansi(markers::HEAD)
             } else {
                 markers::LIST_ITEM.to_string()
             };
             let refs = format_commit_refs(commit);
 
             format!(
-                "{prefix} {YELLOW}{}{RESET}{refs}: {}",
-                commit.hash, commit.title
+                "{prefix} {}{refs}: {}",
+                Accent::CommitHash.paint_ansi(&commit.hash),
+                commit.title
             )
         })
         .collect::<Vec<_>>()
@@ -95,7 +93,22 @@ fn format_commit_refs(commit: &CommitEntry) -> String {
     if commit.refs.is_empty() {
         String::new()
     } else {
-        format!(" ({})", commit.refs.join(", "))
+        let refs = commit
+            .refs
+            .iter()
+            .map(|reference| format_reference(reference))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        format!(" ({refs})")
+    }
+}
+
+fn format_reference(reference: &str) -> String {
+    if reference.starts_with("tag: ") {
+        Accent::TagRef.paint_ansi(reference)
+    } else {
+        Accent::BranchRef.paint_ansi(reference)
     }
 }
 
@@ -144,7 +157,7 @@ mod tests {
 
         assert_eq!(
             formatted,
-            "\u{1b}[32m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m (main, tag: v0.1.0): latest commit\n* \u{1b}[33mdef5678\u{1b}[0m (tag: v0.0.9): older commit"
+            "\u{1b}[34m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m (\u{1b}[32mmain\u{1b}[0m, \u{1b}[33mtag: v0.1.0\u{1b}[0m): latest commit\n* \u{1b}[33mdef5678\u{1b}[0m (\u{1b}[33mtag: v0.0.9\u{1b}[0m): older commit"
         );
     }
 
@@ -163,7 +176,7 @@ mod tests {
 
         assert_eq!(
             format_commit_success_output(&outcome),
-            "10 files changed, 2245 insertions(+)\n\n\u{1b}[32m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m (main): latest commit"
+            "10 files changed, 2245 insertions(+)\n\n\u{1b}[34m→\u{1b}[0m \u{1b}[33mabc1234\u{1b}[0m (\u{1b}[32mmain\u{1b}[0m): latest commit"
         );
     }
 }
