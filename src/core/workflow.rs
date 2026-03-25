@@ -6,8 +6,8 @@ use crate::core::restack::{self, RestackAction, RestackPreview};
 use crate::core::store::fs::DigPaths;
 use crate::core::store::session::StoreSession;
 use crate::core::store::{
-    PendingOperationKind, PendingOperationState, clear_operation, load_operation,
-    record_branch_reparented, save_operation,
+    PendingOperationKind, PendingOperationState, clear_operation, dig_paths, load_config,
+    load_operation, record_branch_reparented, save_operation,
 };
 
 #[derive(Debug)]
@@ -45,15 +45,34 @@ pub(crate) fn ensure_ready_for_operation(repo: &RepoContext, command_name: &str)
     git::ensure_no_in_progress_operations(repo, command_name)
 }
 
+pub(crate) fn ensure_no_pending_operation_for_command(command_name: &str) -> io::Result<()> {
+    let Some(repo) = git::try_resolve_repo_context()? else {
+        return Ok(());
+    };
+
+    let paths = dig_paths(&repo.git_dir);
+    if load_config(&paths)?.is_none() {
+        return Ok(());
+    }
+
+    ensure_no_pending_operation(&paths, command_name)
+}
+
 pub(crate) fn ensure_no_pending_operation(paths: &DigPaths, command_name: &str) -> io::Result<()> {
     let Some(operation) = load_operation(paths)? else {
         return Ok(());
     };
 
-    Err(io::Error::other(format!(
-        "dig {command_name} cannot run while a dig {} operation is paused; run 'dig sync --continue'",
-        operation.origin.command_name()
-    )))
+    Err(pending_operation_error(
+        command_name,
+        operation.origin.command_name(),
+    ))
+}
+
+fn pending_operation_error(command_name: &str, paused_origin: &str) -> io::Error {
+    io::Error::other(format!(
+        "dig {command_name} cannot run while a dig {paused_origin} operation is paused; run 'dig sync --continue'"
+    ))
 }
 
 pub(crate) fn checkout_branch_if_needed(target_branch: &str) -> io::Result<CheckoutBranchOutcome> {

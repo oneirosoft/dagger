@@ -223,6 +223,51 @@ pub fn active_rebase_head_name(repo: &Path) -> String {
     panic!("expected an active rebase head-name file");
 }
 
+pub fn pause_commit_restack(repo: &Path) -> Value {
+    initialize_main_repo(repo);
+    dig_ok(repo, &["init"]);
+    dig_ok(repo, &["branch", "feat/auth"]);
+    commit_file(repo, "shared.txt", "base\n", "feat: auth");
+    dig_ok(repo, &["branch", "feat/auth-ui"]);
+    write_file(repo, "shared.txt", "child\n");
+    git_ok(repo, &["add", "shared.txt"]);
+    git_ok(
+        repo,
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "feat: child change",
+        ],
+    );
+    git_ok(repo, &["checkout", "feat/auth"]);
+    write_file(repo, "shared.txt", "parent\n");
+    git_ok(repo, &["add", "shared.txt"]);
+
+    let output = dig(repo, &["commit", "-m", "feat: parent follow-up"]);
+    assert!(
+        !output.status.success(),
+        "expected paused commit restack setup to fail\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        repo.join(".git/rebase-merge").exists() || repo.join(".git/rebase-apply").exists(),
+        "expected git rebase state to remain active after paused commit restack"
+    );
+
+    let operation = load_operation_json(repo).expect("expected pending dig operation");
+    assert_eq!(operation["origin"]["type"].as_str(), Some("commit"));
+    assert!(
+        active_rebase_head_name(repo).contains("feat/auth-ui"),
+        "expected rebase head-name to reference feat/auth-ui"
+    );
+
+    operation
+}
+
 #[cfg(test)]
 mod tests {
     use super::strip_ansi;

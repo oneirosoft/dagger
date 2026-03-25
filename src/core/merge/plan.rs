@@ -4,10 +4,12 @@ use crate::core::git;
 use crate::core::graph::BranchGraph;
 use crate::core::restack;
 use crate::core::store::{dig_paths, load_config, load_state};
+use crate::core::workflow;
 
 use super::types::{MergeMode, MergeOptions, MergePlan};
 
 pub(crate) fn plan(options: &MergeOptions) -> io::Result<MergePlan> {
+    workflow::ensure_no_pending_operation_for_command("merge")?;
     let branch_name = options.branch_name.trim();
     if branch_name.is_empty() {
         return Err(io::Error::new(

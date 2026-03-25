@@ -4,10 +4,12 @@ use crate::core::git;
 use crate::core::graph::BranchGraph;
 use crate::core::restack;
 use crate::core::store::open_initialized;
+use crate::core::workflow;
 
 use super::types::{OrphanOptions, OrphanPlan};
 
 pub(crate) fn plan(options: &OrphanOptions) -> io::Result<OrphanPlan> {
+    workflow::ensure_no_pending_operation_for_command("orphan")?;
     let session = open_initialized("dig is not initialized; run 'dig init' first")?;
     let original_branch = git::current_branch_name()?;
     let branch_name = resolve_branch_name(&original_branch, options.branch_name.as_deref())?;

@@ -41,6 +41,7 @@ pub struct AdoptOutcome {
 }
 
 pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
+    workflow::ensure_no_pending_operation_for_command("adopt")?;
     let original_branch = git::current_branch_name()?;
     let (session, _) = open_or_initialize(&original_branch)?;
     let branch_name = resolve_branch_name(&original_branch, options.branch_name.as_deref())?;

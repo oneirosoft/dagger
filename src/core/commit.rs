@@ -39,7 +39,7 @@ pub struct CommitOutcome {
 }
 
 pub fn run(options: &CommitOptions) -> io::Result<CommitOutcome> {
-    ensure_no_pending_commit_operation()?;
+    workflow::ensure_no_pending_operation_for_command("commit")?;
     let pre_commit_context = resolve_pre_commit_context()?;
     let status = Command::new("git")
         .args(build_git_commit_args(options))
@@ -249,19 +249,6 @@ impl PostCommitRestackOutcome {
             paused: false,
         }
     }
-}
-
-fn ensure_no_pending_commit_operation() -> io::Result<()> {
-    let Some(repo) = git::try_resolve_repo_context()? else {
-        return Ok(());
-    };
-
-    let paths = dig_paths(&repo.git_dir);
-    if load_config(&paths)?.is_none() {
-        return Ok(());
-    }
-
-    workflow::ensure_no_pending_operation(&paths, "commit")
 }
 
 fn resolve_pre_commit_context() -> io::Result<Option<PreCommitContext>> {

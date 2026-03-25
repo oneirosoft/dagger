@@ -6,6 +6,7 @@ use crate::core::graph::BranchGraph;
 use crate::core::restack;
 use crate::core::store::types::DigState;
 use crate::core::store::{BranchNode, dig_paths, load_config, load_state};
+use crate::core::workflow;
 
 use super::types::{
     BlockedBranch, CleanBlockReason, CleanCandidate, CleanOptions, CleanPlan, CleanReason,
@@ -18,6 +19,7 @@ enum BranchEvaluation {
 }
 
 pub(crate) fn plan(options: &CleanOptions) -> io::Result<CleanPlan> {
+    workflow::ensure_no_pending_operation_for_command("clean")?;
     let repo = git::resolve_repo_context()?;
     let store_paths = dig_paths(&repo.git_dir);
     let config = load_config(&store_paths)?
