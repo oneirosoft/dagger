@@ -4,8 +4,8 @@ use std::process::ExitStatus;
 use uuid::Uuid;
 
 use crate::core::git::{self, RebaseProgress};
-use crate::core::store::types::DigState;
 use crate::core::store::ParentRef;
+use crate::core::store::types::DigState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestackAction {
@@ -43,20 +43,20 @@ pub struct RestackStepOutcome {
     pub stderr: String,
 }
 
-pub fn plan_after_branch_removal(
+pub fn plan_after_branch_detach(
     state: &DigState,
-    removed_node_id: Uuid,
-    removed_branch_name: &str,
+    detached_node_id: Uuid,
+    detached_branch_name: &str,
     new_parent_branch_name: &str,
     new_parent: &ParentRef,
 ) -> io::Result<Vec<RestackAction>> {
     let mut actions = Vec::new();
 
-    for child_id in state.active_children_ids(removed_node_id) {
+    for child_id in state.active_children_ids(detached_node_id) {
         collect_restack_actions(
             state,
             child_id,
-            removed_branch_name,
+            detached_branch_name,
             new_parent_branch_name,
             Some(new_parent.clone()),
             &mut actions,
@@ -104,8 +104,11 @@ where
     }
 
     let parent_change = if let Some(new_parent) = &action.new_parent {
-        let (old_parent, old_base_ref) =
-            state.reparent_branch(action.node_id, new_parent.clone(), action.new_base_branch_name.clone())?;
+        let (old_parent, old_base_ref) = state.reparent_branch(
+            action.node_id,
+            new_parent.clone(),
+            action.new_base_branch_name.clone(),
+        )?;
 
         Some(ParentChange {
             branch_id: action.node_id,
@@ -165,14 +168,7 @@ fn collect_restack_actions(
     });
 
     for child_id in state.active_children_ids(node_id) {
-        collect_restack_actions(
-            state,
-            child_id,
-            &branch_name,
-            &branch_name,
-            None,
-            actions,
-        )?;
+        collect_restack_actions(state, child_id, &branch_name, &branch_name, None, actions)?;
     }
 
     Ok(())

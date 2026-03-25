@@ -8,8 +8,8 @@ use crate::core::git::{self, CherryMarker, CommitMetadata};
 use crate::core::restack::{self, RestackPreview};
 use crate::core::store::types::DigState;
 use crate::core::store::{
-    append_event, dig_paths, load_config, load_state, now_unix_timestamp_secs, save_state,
     BranchArchiveReason, BranchArchivedEvent, BranchNode, BranchReparentedEvent, DigEvent,
+    append_event, dig_paths, load_config, load_state, now_unix_timestamp_secs, save_state,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -84,18 +84,34 @@ pub struct CleanApplyOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CleanEvent {
-    SwitchingToTrunk { from_branch: String, to_branch: String },
-    SwitchedToTrunk { from_branch: String, to_branch: String },
-    RebaseStarted { branch_name: String, onto_branch: String },
+    SwitchingToTrunk {
+        from_branch: String,
+        to_branch: String,
+    },
+    SwitchedToTrunk {
+        from_branch: String,
+        to_branch: String,
+    },
+    RebaseStarted {
+        branch_name: String,
+        onto_branch: String,
+    },
     RebaseProgress {
         branch_name: String,
         onto_branch: String,
         current_commit: usize,
         total_commits: usize,
     },
-    RebaseCompleted { branch_name: String, onto_branch: String },
-    DeleteStarted { branch_name: String },
-    DeleteCompleted { branch_name: String },
+    RebaseCompleted {
+        branch_name: String,
+        onto_branch: String,
+    },
+    DeleteStarted {
+        branch_name: String,
+    },
+    DeleteCompleted {
+        branch_name: String,
+    },
 }
 
 #[derive(Debug)]
@@ -119,7 +135,9 @@ pub fn plan(options: &CleanOptions) -> io::Result<CleanPlan> {
         .map(str::to_string);
 
     match &requested_branch_name {
-        Some(branch_name) => plan_for_requested_branch(&state, &config.trunk_branch, &current_branch, branch_name),
+        Some(branch_name) => {
+            plan_for_requested_branch(&state, &config.trunk_branch, &current_branch, branch_name)
+        }
         None => plan_for_all_branches(&state, &config.trunk_branch, &current_branch),
     }
 }
@@ -144,8 +162,8 @@ where
     }
 
     let repo = git::resolve_repo_context()?;
-    git::ensure_clean_worktree()?;
-    git::ensure_no_in_progress_operations(&repo)?;
+    git::ensure_clean_worktree("clean")?;
+    git::ensure_no_in_progress_operations(&repo, "clean")?;
 
     let store_paths = dig_paths(&repo.git_dir);
     let config = load_config(&store_paths)?
@@ -188,14 +206,16 @@ where
             continue;
         };
 
-        let Some(parent_branch_name) = state.resolve_parent_branch_name(&node, &config.trunk_branch) else {
+        let Some(parent_branch_name) =
+            state.resolve_parent_branch_name(&node, &config.trunk_branch)
+        else {
             return Err(io::Error::other(format!(
                 "tracked parent for '{}' is missing from dig",
                 node.branch_name
             )));
         };
 
-        let restack_actions = restack::plan_after_branch_removal(
+        let restack_actions = restack::plan_after_branch_detach(
             &state,
             node.id,
             &node.branch_name,
@@ -443,7 +463,7 @@ fn evaluate_branch(
         }));
     }
 
-    let restack_actions = restack::plan_after_branch_removal(
+    let restack_actions = restack::plan_after_branch_detach(
         state,
         node.id,
         &node.branch_name,
@@ -465,9 +485,9 @@ fn evaluate_branch(
 }
 
 fn build_clean_tree(state: &DigState, node_id: Uuid) -> io::Result<CleanTreeNode> {
-    let node = state.find_branch_by_id(node_id).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "tracked branch was not found")
-    })?;
+    let node = state
+        .find_branch_by_id(node_id)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "tracked branch was not found"))?;
 
     let mut children = Vec::new();
     for child_id in state.active_children_ids(node_id) {
@@ -512,7 +532,10 @@ fn branch_is_integrated_by_cherry(parent_branch_name: &str, branch_name: &str) -
         .all(|marker| matches!(marker, CherryMarker::Equivalent)))
 }
 
-fn branch_is_integrated_by_squash_message(parent_branch_name: &str, branch_name: &str) -> io::Result<bool> {
+fn branch_is_integrated_by_squash_message(
+    parent_branch_name: &str,
+    branch_name: &str,
+) -> io::Result<bool> {
     let merge_base = git::merge_base(parent_branch_name, branch_name)?;
     let branch_commits = git::commit_metadata_in_range(&format!("{merge_base}..{branch_name}"))?;
 
@@ -523,9 +546,9 @@ fn branch_is_integrated_by_squash_message(parent_branch_name: &str, branch_name:
     let parent_commits =
         git::commit_metadata_in_range(&format!("{merge_base}..{parent_branch_name}"))?;
 
-    Ok(parent_commits
-        .iter()
-        .any(|parent_commit| parent_commit_mentions_all_branch_commits(parent_commit, &branch_commits)))
+    Ok(parent_commits.iter().any(|parent_commit| {
+        parent_commit_mentions_all_branch_commits(parent_commit, &branch_commits)
+    }))
 }
 
 fn parent_commit_mentions_all_branch_commits(
@@ -554,18 +577,18 @@ fn parent_commit_mentions_all_branch_commits(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply, parent_commit_mentions_all_branch_commits, plan, BlockedBranch, CleanBlockReason,
-        CleanOptions, CleanReason,
+        BlockedBranch, CleanBlockReason, CleanOptions, CleanReason, apply,
+        parent_commit_mentions_all_branch_commits, plan,
     };
     use crate::core::branch::{self, BranchOptions};
     use crate::core::git::{self, CommitMetadata};
-    use crate::core::store::{dig_paths, load_state, ParentRef};
+    use crate::core::store::{ParentRef, dig_paths, load_state};
     use std::env;
     use std::fs;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::path::Path;
     use std::process::Command;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::MutexGuard;
     use uuid::Uuid;
 
     #[test]
@@ -622,7 +645,8 @@ mod tests {
                 },
                 CommitMetadata {
                     sha: "1de9e06d1174402332fdd5343a387249b0a5ef66".into(),
-                    subject: "feat: new parent flag to specify the parent mannualy of a branch".into(),
+                    subject: "feat: new parent flag to specify the parent mannualy of a branch"
+                        .into(),
                     body: String::new(),
                 },
             ]
@@ -635,11 +659,21 @@ mod tests {
             initialize_main_repo(repo);
             create_tracked_branch("feat/auth");
             commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-            append_file(repo, "auth.txt", "auth second line\n", "feat: auth follow-up");
+            append_file(
+                repo,
+                "auth.txt",
+                "auth second line\n",
+                "feat: auth follow-up",
+            );
             create_tracked_branch("feat/auth-api");
             commit_file(repo, "auth-api.txt", "api\n", "feat: auth api");
             create_tracked_branch("feat/auth-api-tests");
-            commit_file(repo, "auth-api-tests.txt", "tests\n", "feat: auth api tests");
+            commit_file(
+                repo,
+                "auth-api-tests.txt",
+                "tests\n",
+                "feat: auth api tests",
+            );
 
             squash_merge_branch_with_commit_listing(repo, "main", "feat/auth", "feat: merge auth");
             git_ok(repo, &["checkout", "feat/auth"]);
@@ -764,9 +798,7 @@ mod tests {
     }
 
     fn with_temp_repo(test: impl FnOnce(&Path)) {
-        static CWD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-        let guard = CWD_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let guard: MutexGuard<'_, ()> = crate::core::test_cwd_lock().lock().unwrap();
         let original_dir = env::current_dir().unwrap();
         let repo_dir = env::temp_dir().join(format!("dig-clean-{}", Uuid::new_v4()));
         fs::create_dir_all(&repo_dir).unwrap();
@@ -805,7 +837,17 @@ mod tests {
     fn commit_file(repo: &Path, file_name: &str, contents: &str, message: &str) {
         fs::write(repo.join(file_name), contents).unwrap();
         git_ok(repo, &["add", file_name]);
-        git_ok(repo, &["-c", "commit.gpgsign=false", "commit", "--quiet", "-m", message]);
+        git_ok(
+            repo,
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ],
+        );
     }
 
     fn append_file(repo: &Path, file_name: &str, contents: &str, message: &str) {
@@ -814,7 +856,17 @@ mod tests {
         existing.push_str(contents);
         fs::write(&path, existing).unwrap();
         git_ok(repo, &["add", file_name]);
-        git_ok(repo, &["-c", "commit.gpgsign=false", "commit", "--quiet", "-m", message]);
+        git_ok(
+            repo,
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ],
+        );
     }
 
     fn squash_merge_branch_with_commit_listing(
@@ -825,7 +877,12 @@ mod tests {
     ) {
         let commits = git_output(
             repo,
-            &["log", "--reverse", "--format=%H%x1f%s", &format!("{target_branch}..{source_branch}")],
+            &[
+                "log",
+                "--reverse",
+                "--format=%H%x1f%s",
+                &format!("{target_branch}..{source_branch}"),
+            ],
         );
 
         git_ok(repo, &["checkout", target_branch]);

@@ -1,12 +1,14 @@
 mod branch;
 mod clean;
-mod init;
 mod commit;
+mod init;
+mod merge;
+mod operation;
 mod tree;
 
 use std::io;
-use std::process::ExitStatus;
 use std::process::ExitCode;
+use std::process::ExitStatus;
 
 use clap::{Parser, Subcommand};
 
@@ -32,6 +34,9 @@ enum Commands {
     /// Wrap git commit with limited passthrough flags
     Commit(commit::CommitArgs),
 
+    /// Merge a tracked branch into its tracked base and restack descendants
+    Merge(merge::MergeArgs),
+
     /// Print the tracked branch stacks as a shared tree from trunk
     Tree(tree::TreeArgs),
 }
@@ -49,6 +54,7 @@ pub fn run() -> ExitCode {
         Commands::Clean(args) => clean::execute(args),
         Commands::Init(args) => init::execute(args),
         Commands::Commit(args) => commit::execute(args),
+        Commands::Merge(args) => merge::execute(args),
         Commands::Tree(args) => tree::execute(args),
     };
 

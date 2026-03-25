@@ -8,7 +8,7 @@ use crate::core::tree::{self, TreeOptions};
 
 use super::CommandOutcome;
 
-pub(super) use render::render_branch_lineage;
+pub(super) use render::{render_branch_lineage, render_stack_tree};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct TreeArgs {

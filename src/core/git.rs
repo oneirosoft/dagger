@@ -1,6 +1,7 @@
 use std::env;
 use std::io;
 use std::io::Read;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Output, Stdio};
 
@@ -19,7 +20,22 @@ pub struct RebaseProgress {
 #[derive(Debug)]
 pub struct GitCommandOutput {
     pub status: ExitStatus,
+    pub stdout: String,
     pub stderr: String,
+}
+
+impl GitCommandOutput {
+    pub fn combined_output(&self) -> String {
+        let stdout = self.stdout.trim();
+        let stderr = self.stderr.trim();
+
+        match (stdout.is_empty(), stderr.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => stdout.to_string(),
+            (true, false) => stderr.to_string(),
+            (false, false) => format!("{stdout}\n{stderr}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,14 +51,16 @@ pub struct RepoContext {
 }
 
 pub fn try_resolve_repo_context() -> io::Result<Option<RepoContext>> {
-    let output = Command::new("git").args(["rev-parse", "--git-dir"]).output()?;
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .output()?;
 
     if !output.status.success() {
         return Ok(None);
     }
 
-    let stdout =
-        String::from_utf8(output.stdout).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     let git_dir = resolve_git_dir(stdout.trim())?;
 
     Ok(Some(RepoContext { git_dir }))
@@ -92,7 +110,12 @@ pub fn merge_base(left: &str, right: &str) -> io::Result<String> {
 
 pub fn branch_exists(branch_name: &str) -> io::Result<bool> {
     let status = Command::new("git")
-        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch_name}")])
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch_name}"),
+        ])
         .status()?;
 
     Ok(status.success())
@@ -114,6 +137,37 @@ pub fn delete_branch_force(branch_name: &str) -> io::Result<ExitStatus> {
     Command::new("git")
         .args(["branch", "--quiet", "-D", branch_name])
         .status()
+}
+
+pub fn merge_branch(branch_name: &str) -> io::Result<GitCommandOutput> {
+    run_git_capture_output(["merge", branch_name])
+}
+
+pub fn squash_merge_branch(branch_name: &str) -> io::Result<GitCommandOutput> {
+    run_git_capture_output(["merge", "--squash", branch_name])
+}
+
+pub fn commit_with_message_file(message_file: &Path) -> io::Result<GitCommandOutput> {
+    let output = Command::new("git")
+        .args(["commit", "--quiet", "-F"])
+        .arg(message_file)
+        .output()?;
+
+    output_to_git_command_output(output)
+}
+
+pub fn has_staged_changes() -> io::Result<bool> {
+    let status = Command::new("git")
+        .args(["diff", "--cached", "--quiet", "--exit-code"])
+        .status()?;
+
+    if status.success() {
+        Ok(false)
+    } else if status.code() == Some(1) {
+        Ok(true)
+    } else {
+        Err(io::Error::other("git diff --cached --quiet failed"))
+    }
 }
 
 pub fn rebase_onto_with_progress<F>(
@@ -160,14 +214,13 @@ where
 
     Ok(GitCommandOutput {
         status,
+        stdout: String::new(),
         stderr: stderr_output,
     })
 }
 
 pub fn init_repository() -> io::Result<ExitStatus> {
-    Command::new("git")
-        .args(["init", "--quiet"])
-        .status()
+    Command::new("git").args(["init", "--quiet"]).status()
 }
 
 pub fn probe_repo_status() -> io::Result<ExitStatus> {
@@ -186,19 +239,19 @@ pub fn success_status() -> io::Result<ExitStatus> {
         .status()
 }
 
-pub fn ensure_clean_worktree() -> io::Result<()> {
+pub fn ensure_clean_worktree(command_name: &str) -> io::Result<()> {
     let status = read_git_stdout(["status", "--porcelain"])?;
 
     if status.is_empty() {
         Ok(())
     } else {
-        Err(io::Error::other(
-            "dig clean requires a clean working tree",
-        ))
+        Err(io::Error::other(format!(
+            "dig {command_name} requires a clean working tree"
+        )))
     }
 }
 
-pub fn ensure_no_in_progress_operations(repo: &RepoContext) -> io::Result<()> {
+pub fn ensure_no_in_progress_operations(repo: &RepoContext, command_name: &str) -> io::Result<()> {
     let in_progress_paths = [
         ("MERGE_HEAD", "merge"),
         ("CHERRY_PICK_HEAD", "cherry-pick"),
@@ -208,7 +261,7 @@ pub fn ensure_no_in_progress_operations(repo: &RepoContext) -> io::Result<()> {
     for (relative_path, operation_name) in in_progress_paths {
         if repo.git_dir.join(relative_path).exists() {
             return Err(io::Error::other(format!(
-                "dig clean cannot run while a git {operation_name} is in progress"
+                "dig {command_name} cannot run while a git {operation_name} is in progress"
             )));
         }
     }
@@ -216,16 +269,19 @@ pub fn ensure_no_in_progress_operations(repo: &RepoContext) -> io::Result<()> {
     let rebase_dirs = ["rebase-merge", "rebase-apply"];
     for relative_path in rebase_dirs {
         if repo.git_dir.join(relative_path).exists() {
-            return Err(io::Error::other(
-                "dig clean cannot run while a git rebase is in progress",
-            ));
+            return Err(io::Error::other(format!(
+                "dig {command_name} cannot run while a git rebase is in progress"
+            )));
         }
     }
 
     Ok(())
 }
 
-pub fn cherry_markers(parent_branch_name: &str, branch_name: &str) -> io::Result<Vec<CherryMarker>> {
+pub fn cherry_markers(
+    parent_branch_name: &str,
+    branch_name: &str,
+) -> io::Result<Vec<CherryMarker>> {
     let stdout = read_git_stdout(["cherry", parent_branch_name, branch_name])?;
 
     stdout
@@ -244,17 +300,28 @@ pub fn cherry_markers(parent_branch_name: &str, branch_name: &str) -> io::Result
 
 pub fn commit_metadata_in_range(range_spec: &str) -> io::Result<Vec<CommitMetadata>> {
     let output = Command::new("git")
-        .args(["log", "--reverse", "--format=%H%x1f%s%x1f%B%x1e", range_spec])
+        .args([
+            "log",
+            "--reverse",
+            "--format=%H%x1f%s%x1f%B%x1e",
+            range_spec,
+        ])
         .output()?;
 
     if !output.status.success() {
         return Err(git_command_failed(&output));
     }
 
-    let stdout =
-        String::from_utf8(output.stdout).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     Ok(parse_commit_metadata_records(&stdout))
+}
+
+fn run_git_capture_output<const N: usize>(args: [&str; N]) -> io::Result<GitCommandOutput> {
+    let output = Command::new("git").args(args).output()?;
+
+    output_to_git_command_output(output)
 }
 
 fn read_git_stdout<const N: usize>(args: [&str; N]) -> io::Result<String> {
@@ -264,10 +331,20 @@ fn read_git_stdout<const N: usize>(args: [&str; N]) -> io::Result<String> {
         return Err(git_command_failed(&output));
     }
 
-    let stdout =
-        String::from_utf8(output.stdout).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     Ok(stdout.trim().to_string())
+}
+
+fn output_to_git_command_output(output: Output) -> io::Result<GitCommandOutput> {
+    Ok(GitCommandOutput {
+        status: output.status,
+        stdout: String::from_utf8(output.stdout)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+        stderr: String::from_utf8(output.stderr)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+    })
 }
 
 fn git_command_failed(output: &Output) -> io::Error {
@@ -339,9 +416,12 @@ mod tests {
         let repo_git_dir = env::temp_dir().join(format!("dig-git-{}", Uuid::new_v4()));
         fs::create_dir_all(repo_git_dir.join("rebase-merge")).unwrap();
 
-        let error = super::ensure_no_in_progress_operations(&RepoContext {
-            git_dir: PathBuf::from(&repo_git_dir),
-        })
+        let error = super::ensure_no_in_progress_operations(
+            &RepoContext {
+                git_dir: PathBuf::from(&repo_git_dir),
+            },
+            "clean",
+        )
         .unwrap_err();
 
         assert!(error.to_string().contains("rebase"));
@@ -361,7 +441,10 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        assert_eq!(markers, vec![CherryMarker::Equivalent, CherryMarker::Missing]);
+        assert_eq!(
+            markers,
+            vec![CherryMarker::Equivalent, CherryMarker::Missing]
+        );
     }
 
     #[test]
