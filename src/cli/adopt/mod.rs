@@ -6,6 +6,7 @@ use crate::core::adopt::{self, AdoptOptions, AdoptOutcome};
 use crate::core::tree;
 
 use super::CommandOutcome;
+use super::common;
 
 #[derive(Args, Debug, Clone)]
 pub struct AdoptArgs {
@@ -28,11 +29,8 @@ pub fn execute(args: AdoptArgs) -> io::Result<CommandOutcome> {
         if !output.is_empty() {
             println!("{output}");
         }
-    } else if let Some(failure_output) = &outcome.failure_output {
-        let trimmed = failure_output.trim();
-        if !trimmed.is_empty() {
-            eprintln!("{trimmed}");
-        }
+    } else {
+        common::print_trimmed_stderr(outcome.failure_output.as_deref());
     }
 
     Ok(CommandOutcome {
@@ -73,7 +71,7 @@ fn format_adopt_success_output(outcome: &AdoptOutcome, rendered_tree: &str) -> S
         sections.push(rendered_tree.to_string());
     }
 
-    sections.join("\n\n")
+    common::join_sections(&sections)
 }
 
 #[cfg(test)]

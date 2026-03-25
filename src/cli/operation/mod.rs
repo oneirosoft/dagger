@@ -1,6 +1,7 @@
 use std::io;
 use std::io::Write;
 
+use super::common;
 use crate::ui::markers;
 use crate::ui::palette::Accent;
 
@@ -136,53 +137,30 @@ impl BranchStatus {
 }
 
 pub fn render_sections(sections: &[OperationSection], final_view: bool) -> String {
-    sections
-        .iter()
-        .map(|section| render_section(section, final_view))
-        .collect::<Vec<_>>()
-        .join("\n\n")
+    common::join_sections(
+        &sections
+            .iter()
+            .map(|section| render_section(section, final_view))
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn render_section(section: &OperationSection, final_view: bool) -> String {
-    let mut lines = vec![section.root_label.clone()];
-
-    if final_view
+    let roots = if final_view
         && section.promote_children_on_deleted_root
         && matches!(section.root.status, BranchStatus::Deleted)
     {
-        for (index, child) in section.root.children.iter().enumerate() {
-            render_node(
-                child,
-                "",
-                index + 1 == section.root.children.len(),
-                &mut lines,
-            );
-        }
+        section.root.children.as_slice()
     } else {
-        render_node(&section.root, "", true, &mut lines);
-    }
-
-    lines.join("\n")
-}
-
-fn render_node(node: &VisualNode, prefix: &str, is_last: bool, lines: &mut Vec<String>) {
-    let connector = if is_last { "└──" } else { "├──" };
-    lines.push(format!("{prefix}{connector} {}", format_branch_label(node)));
-
-    let child_prefix = if is_last {
-        format!("{prefix}    ")
-    } else {
-        format!("{prefix}│   ")
+        std::slice::from_ref(&section.root)
     };
 
-    for (index, child) in node.children.iter().enumerate() {
-        render_node(
-            child,
-            &child_prefix,
-            index + 1 == node.children.len(),
-            lines,
-        );
-    }
+    common::render_tree(
+        Some(section.root_label.clone()),
+        roots,
+        &format_branch_label,
+        &|node| node.children.as_slice(),
+    )
 }
 
 fn format_branch_label(node: &VisualNode) -> String {

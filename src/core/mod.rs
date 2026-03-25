@@ -2,12 +2,16 @@ pub(crate) mod adopt;
 pub(crate) mod branch;
 pub(crate) mod clean;
 pub(crate) mod commit;
+pub(crate) mod graph;
 pub(crate) mod git;
 pub(crate) mod init;
 pub(crate) mod merge;
 pub(crate) mod restack;
 pub(crate) mod store;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub(crate) mod tree;
+pub(crate) mod workflow;
 
 #[cfg(test)]
 pub(crate) fn test_cwd_lock() -> &'static std::sync::Mutex<()> {

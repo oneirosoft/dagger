@@ -1,10 +1,9 @@
 use std::io;
 use std::process::ExitStatus;
 
+use crate::core::graph::BranchGraph;
 use crate::core::git;
-use crate::core::store::{
-    StoreInitialization, dig_paths, initialize_store, load_config, load_state,
-};
+use crate::core::store::{StoreInitialization, open_or_initialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InitOptions {}
@@ -18,36 +17,33 @@ pub struct InitOutcome {
 }
 
 pub fn run(_: &InitOptions) -> io::Result<InitOutcome> {
-    let (status, created_git_repo, repo_context) = match git::try_resolve_repo_context()? {
-        Some(repo_context) => (git::probe_repo_status()?, false, repo_context),
+    let (status, created_git_repo) = match git::try_resolve_repo_context()? {
+        Some(_) => (git::probe_repo_status()?, false),
         None => {
             let status = git::init_repository()?;
             if !status.success() {
                 return Err(io::Error::other("git init failed"));
             }
 
-            let repo_context = git::resolve_repo_context()?;
-            (status, true, repo_context)
+            (status, true)
         }
     };
 
     let current_branch = git::current_branch_name_or("main")?;
-    let store_paths = dig_paths(&repo_context.git_dir);
-    let store_initialization = initialize_store(&store_paths, &current_branch)?;
-    let config =
-        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig config is missing"))?;
-    let state = load_state(&store_paths)?;
+    let (session, store_initialization) = open_or_initialize(&current_branch)?;
+    let graph = BranchGraph::new(&session.state);
 
     Ok(InitOutcome {
         status,
         created_git_repo,
-        lineage: state.branch_lineage(&current_branch, &config.trunk_branch),
+        lineage: graph.lineage(&current_branch, &session.config.trunk_branch),
         store_initialization,
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::core::graph::BranchGraph;
     use crate::core::store::StoreInitialization;
     use crate::core::store::types::DigState;
     use std::process::{Command, Stdio};
@@ -62,7 +58,7 @@ mod tests {
         let outcome = super::InitOutcome {
             status,
             created_git_repo: true,
-            lineage: DigState::default().branch_lineage("main", "main"),
+            lineage: BranchGraph::new(&DigState::default()).lineage("main", "main"),
             store_initialization: StoreInitialization::default(),
         };
 

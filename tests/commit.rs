@@ -1,12 +1,15 @@
-use std::fs;
-use std::path::Path;
-use std::process::{Command, Output};
+mod support;
 
-use uuid::Uuid;
+use std::fs;
+
+use support::{
+    active_rebase_head_name, append_to_file, commit_file, dig, dig_ok, git_ok, git_stdout,
+    initialize_main_repo, strip_ansi, with_temp_repo, write_file,
+};
 
 #[test]
 fn restacks_tracked_descendants_after_commit_and_preserves_store_files() {
-    with_temp_repo(|repo| {
+    with_temp_repo("dig-commit-cli", |repo| {
         initialize_main_repo(repo);
         dig_ok(repo, &["init"]);
         dig_ok(repo, &["branch", "feat/auth"]);
@@ -60,7 +63,7 @@ fn restacks_tracked_descendants_after_commit_and_preserves_store_files() {
 
 #[test]
 fn restacks_child_after_amend_using_old_head_oid() {
-    with_temp_repo(|repo| {
+    with_temp_repo("dig-commit-cli", |repo| {
         initialize_main_repo(repo);
         dig_ok(repo, &["init"]);
         dig_ok(repo, &["branch", "feat/auth"]);
@@ -101,7 +104,7 @@ fn restacks_child_after_amend_using_old_head_oid() {
 
 #[test]
 fn leaves_rebase_open_on_conflicting_child_after_commit() {
-    with_temp_repo(|repo| {
+    with_temp_repo("dig-commit-cli", |repo| {
         initialize_main_repo(repo);
         dig_ok(repo, &["init"]);
         dig_ok(repo, &["branch", "feat/auth"]);
@@ -153,129 +156,4 @@ fn leaves_rebase_open_on_conflicting_child_after_commit() {
             events_before
         );
     });
-}
-
-fn with_temp_repo(test: impl FnOnce(&Path)) {
-    let repo_dir = std::env::temp_dir().join(format!("dig-commit-cli-{}", Uuid::new_v4()));
-    fs::create_dir_all(&repo_dir).unwrap();
-
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        test(&repo_dir);
-    }));
-
-    fs::remove_dir_all(&repo_dir).unwrap();
-
-    if let Err(payload) = result {
-        std::panic::resume_unwind(payload);
-    }
-}
-
-fn initialize_main_repo(repo: &Path) {
-    git_ok(repo, &["init", "--quiet"]);
-    git_ok(repo, &["checkout", "-b", "main"]);
-    git_ok(repo, &["config", "user.name", "Dig Test"]);
-    git_ok(repo, &["config", "user.email", "dig@example.com"]);
-    git_ok(repo, &["config", "commit.gpgsign", "false"]);
-    commit_file(repo, "README.md", "root\n", "chore: init");
-}
-
-fn commit_file(repo: &Path, file_name: &str, contents: &str, message: &str) {
-    write_file(repo, file_name, contents);
-    git_ok(repo, &["add", file_name]);
-    git_ok(
-        repo,
-        &[
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "--quiet",
-            "-m",
-            message,
-        ],
-    );
-}
-
-fn append_to_file(repo: &Path, file_name: &str, contents: &str) {
-    let path = repo.join(file_name);
-    let mut existing = fs::read_to_string(&path).unwrap();
-    existing.push_str(contents);
-    fs::write(path, existing).unwrap();
-}
-
-fn write_file(repo: &Path, file_name: &str, contents: &str) {
-    fs::write(repo.join(file_name), contents).unwrap();
-}
-
-fn dig(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_dig"))
-        .current_dir(repo)
-        .args(args)
-        .output()
-        .unwrap()
-}
-
-fn dig_ok(repo: &Path, args: &[&str]) -> Output {
-    let output = dig(repo, args);
-    assert!(
-        output.status.success(),
-        "dig {:?} failed\nstdout:\n{}\nstderr:\n{}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    output
-}
-
-fn git_ok(repo: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .current_dir(repo)
-        .args(args)
-        .status()
-        .unwrap();
-
-    assert!(status.success(), "git {:?} failed", args);
-}
-
-fn git_stdout(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .current_dir(repo)
-        .args(args)
-        .output()
-        .unwrap();
-
-    assert!(output.status.success(), "git {:?} failed", args);
-
-    String::from_utf8(output.stdout).unwrap().trim().to_string()
-}
-
-fn strip_ansi(text: &str) -> String {
-    let mut stripped = String::new();
-    let mut chars = text.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
-            chars.next();
-            for next in chars.by_ref() {
-                if ('@'..='~').contains(&next) {
-                    break;
-                }
-            }
-            continue;
-        }
-
-        stripped.push(ch);
-    }
-
-    stripped
-}
-
-fn active_rebase_head_name(repo: &Path) -> String {
-    for relative_path in ["rebase-merge/head-name", "rebase-apply/head-name"] {
-        let path = repo.join(".git").join(relative_path);
-        if path.exists() {
-            return fs::read_to_string(path).unwrap();
-        }
-    }
-
-    panic!("expected an active rebase head-name file");
 }

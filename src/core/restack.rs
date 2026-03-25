@@ -3,6 +3,7 @@ use std::process::ExitStatus;
 
 use uuid::Uuid;
 
+use crate::core::graph::BranchGraph;
 use crate::core::git::{self, RebaseProgress};
 use crate::core::store::ParentRef;
 use crate::core::store::types::DigState;
@@ -51,8 +52,9 @@ pub fn plan_after_branch_detach(
     new_parent: &ParentRef,
 ) -> io::Result<Vec<RestackAction>> {
     let mut actions = Vec::new();
+    let graph = BranchGraph::new(state);
 
-    for child_id in state.active_children_ids(detached_node_id) {
+    for child_id in graph.active_children_ids(detached_node_id) {
         collect_restack_actions(
             state,
             child_id,
@@ -73,8 +75,9 @@ pub fn plan_after_branch_advance(
     old_head_oid: &str,
 ) -> io::Result<Vec<RestackAction>> {
     let mut actions = Vec::new();
+    let graph = BranchGraph::new(state);
 
-    for child_id in state.active_children_ids(advanced_node_id) {
+    for child_id in graph.active_children_ids(advanced_node_id) {
         collect_branch_advance_actions(
             state,
             child_id,
@@ -172,7 +175,7 @@ fn collect_branch_advance_actions(
         new_parent: None,
     });
 
-    for child_id in state.active_children_ids(node_id) {
+    for child_id in BranchGraph::new(state).active_children_ids(node_id) {
         let branch_head_oid = git::ref_oid(&branch_name)?;
         collect_branch_advance_actions(
             state,
@@ -207,7 +210,7 @@ fn collect_restack_actions(
         new_parent,
     });
 
-    for child_id in state.active_children_ids(node_id) {
+    for child_id in BranchGraph::new(state).active_children_ids(node_id) {
         collect_restack_actions(state, child_id, &branch_name, &branch_name, None, actions)?;
     }
 
@@ -244,11 +247,7 @@ mod tests {
     use crate::core::git;
     use crate::core::store::types::DIG_STATE_VERSION;
     use crate::core::store::{BranchNode, ParentRef};
-    use std::env;
-    use std::fs;
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-    use std::path::Path;
-    use std::process::Command;
+    use crate::core::test_support::{commit_file, git_ok, initialize_main_repo, with_temp_repo};
     use uuid::Uuid;
 
     #[test]
@@ -282,7 +281,7 @@ mod tests {
 
     #[test]
     fn plans_restack_after_branch_advance_with_old_head_for_immediate_child() {
-        with_temp_repo(|repo| {
+        with_temp_repo("dig-restack", |repo| {
             initialize_main_repo(repo);
             git_ok(repo, &["checkout", "-b", "feat/auth"]);
             commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -359,58 +358,4 @@ mod tests {
         });
     }
 
-    fn with_temp_repo(test: impl FnOnce(&Path)) {
-        let guard = crate::core::test_cwd_lock().lock().unwrap();
-        let original_dir = env::current_dir().unwrap();
-        let repo_dir = env::temp_dir().join(format!("dig-restack-{}", Uuid::new_v4()));
-        fs::create_dir_all(&repo_dir).unwrap();
-
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            env::set_current_dir(&repo_dir).unwrap();
-            test(&repo_dir);
-        }));
-
-        env::set_current_dir(original_dir).unwrap();
-        fs::remove_dir_all(&repo_dir).unwrap();
-        drop(guard);
-
-        if let Err(payload) = result {
-            std::panic::resume_unwind(payload);
-        }
-    }
-
-    fn initialize_main_repo(repo: &Path) {
-        git_ok(repo, &["init", "--quiet"]);
-        git_ok(repo, &["checkout", "-b", "main"]);
-        git_ok(repo, &["config", "user.name", "Dig Test"]);
-        git_ok(repo, &["config", "user.email", "dig@example.com"]);
-        git_ok(repo, &["config", "commit.gpgsign", "false"]);
-        commit_file(repo, "README.md", "root\n", "chore: init");
-    }
-
-    fn commit_file(repo: &Path, file_name: &str, contents: &str, message: &str) {
-        fs::write(repo.join(file_name), contents).unwrap();
-        git_ok(repo, &["add", file_name]);
-        git_ok(
-            repo,
-            &[
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "--quiet",
-                "-m",
-                message,
-            ],
-        );
-    }
-
-    fn git_ok(repo: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .current_dir(repo)
-            .args(args)
-            .status()
-            .unwrap();
-
-        assert!(status.success(), "git {:?} failed", args);
-    }
 }

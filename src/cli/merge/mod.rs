@@ -1,9 +1,7 @@
-#[path = "merge/render.rs"]
 mod render;
 
 use std::io;
 use std::io::IsTerminal;
-use std::io::Write;
 
 use clap::{ArgAction, Args};
 
@@ -11,6 +9,7 @@ use crate::core::merge::{self, MergeMode, MergeOptions, MergeOutcome, MergePlan}
 use crate::core::tree::{self, TreeOptions};
 
 use super::CommandOutcome;
+use super::common;
 
 #[derive(Args, Debug, Clone)]
 pub struct MergeArgs {
@@ -111,14 +110,7 @@ fn format_merge_plan(plan: &MergePlan) -> String {
 }
 
 fn confirm_delete_merged_branch(branch_name: &str) -> io::Result<bool> {
-    let mut stdout = io::stdout();
-    write!(stdout, "Delete merged branch '{branch_name}'? [y/N] ")?;
-    stdout.flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-
-    Ok(matches!(input.trim(), "y" | "Y" | "yes" | "YES" | "Yes"))
+    common::confirm_yes_no(&format!("Delete merged branch '{branch_name}'? [y/N] "))
 }
 
 fn execute_with_animation(plan: &MergePlan) -> io::Result<MergeOutcome> {
@@ -138,13 +130,7 @@ fn execute_with_animation(plan: &MergePlan) -> io::Result<MergeOutcome> {
         terminal.finish(&animation.render_final())?;
     } else {
         terminal.finish(&animation.render_active())?;
-
-        if let Some(failure_output) = &outcome.failure_output {
-            let trimmed = failure_output.trim();
-            if !trimmed.is_empty() {
-                eprintln!("{trimmed}");
-            }
-        }
+        common::print_trimmed_stderr(outcome.failure_output.as_deref());
     }
 
     Ok(outcome)
@@ -154,12 +140,7 @@ fn execute_without_animation(plan: &MergePlan) -> io::Result<MergeOutcome> {
     let outcome = merge::apply(plan)?;
 
     if !outcome.status.success() {
-        if let Some(failure_output) = &outcome.failure_output {
-            let trimmed = failure_output.trim();
-            if !trimmed.is_empty() {
-                eprintln!("{trimmed}");
-            }
-        }
+        common::print_trimmed_stderr(outcome.failure_output.as_deref());
     }
 
     Ok(outcome)
@@ -201,13 +182,7 @@ fn format_merge_success_output(
 
     if !outcome.restacked_branches.is_empty() {
         summary_lines.push(String::new());
-        summary_lines.push("Restacked:".to_string());
-        for branch in &outcome.restacked_branches {
-            summary_lines.push(format!(
-                "- {} onto {}",
-                branch.branch_name, branch.onto_branch
-            ));
-        }
+        summary_lines.push(common::format_restacked_branches(&outcome.restacked_branches));
     }
 
     match deleted_branch_name {
@@ -227,7 +202,7 @@ fn format_merge_success_output(
         sections.push(rendered_tree.to_string());
     }
 
-    sections.join("\n\n")
+    common::join_sections(&sections)
 }
 
 #[cfg(test)]

@@ -3,7 +3,8 @@ use std::process::{Command, ExitStatus};
 
 use crate::core::git::{self, RepoContext};
 use crate::core::restack::{self, RestackPreview};
-use crate::core::store::{dig_paths, load_config, load_state};
+use crate::core::store::{StoreSession, dig_paths, load_config, load_state};
+use crate::core::workflow;
 
 pub const RECENT_COMMITS_LIMIT: usize = 5;
 
@@ -257,45 +258,43 @@ fn maybe_restack_after_commit_inner(
         return Ok(PostCommitRestackOutcome::default());
     }
 
-    let mut state = load_state(&store_paths)?;
+    let state = load_state(&store_paths)?;
     let Some(node) = state.find_branch_by_name(current_branch).cloned() else {
         return Ok(PostCommitRestackOutcome::default());
     };
 
-    let actions =
-        restack::plan_after_branch_advance(&state, node.id, &node.branch_name, old_head_oid)?;
-    let mut restacked_branches = Vec::new();
-
-    for action in &actions {
-        let outcome = match restack::apply_action(&mut state, action, |_| Ok(())) {
-            Ok(outcome) => outcome,
-            Err(err) => {
-                return Ok(PostCommitRestackOutcome::failure(
-                    restacked_branches,
-                    err.to_string(),
-                ));
-            }
-        };
-
-        if !outcome.status.success() {
-            return Ok(PostCommitRestackOutcome {
-                status_override: Some(outcome.status),
-                restacked_branches,
-                failure_output: Some(outcome.stderr),
-            });
+    let actions = restack::plan_after_branch_advance(&state, node.id, &node.branch_name, old_head_oid)?;
+    let mut session = StoreSession {
+        repo: context.repo.clone(),
+        paths: store_paths,
+        config,
+        state,
+    };
+    let restack_outcome = match workflow::apply_restack_actions(
+        &mut session,
+        &actions,
+        &mut |_| Ok(()),
+    ) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            return Ok(PostCommitRestackOutcome::failure(Vec::new(), err.to_string()));
         }
+    };
 
-        restacked_branches.push(RestackPreview {
-            branch_name: outcome.branch_name,
-            onto_branch: outcome.onto_branch,
-            parent_changed: false,
+    if !restack_outcome.status.success() {
+        return Ok(PostCommitRestackOutcome {
+            status_override: Some(restack_outcome.status),
+            restacked_branches: restack_outcome.restacked_branches,
+            failure_output: restack_outcome.failure_output,
         });
     }
 
+    let restacked_branches = restack_outcome.restacked_branches;
+
     if !restacked_branches.is_empty() {
-        let checked_out_branch = git::current_branch_name_if_any()?;
-        if checked_out_branch.as_deref() != Some(current_branch) {
-            let status = git::switch_branch(current_branch)?;
+        let checkout = workflow::checkout_branch_if_needed(current_branch)?;
+        if checkout.switched_from.is_some() {
+            let status = checkout.status;
             return Ok(PostCommitRestackOutcome {
                 status_override: Some(status),
                 restacked_branches,

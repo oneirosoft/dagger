@@ -8,6 +8,7 @@ use crate::ui::markers;
 use crate::ui::palette::Accent;
 
 use super::CommandOutcome;
+use super::common;
 
 #[derive(Args, Debug, Clone)]
 pub struct CommitArgs {
@@ -40,12 +41,7 @@ pub fn execute(args: CommitArgs) -> io::Result<CommandOutcome> {
     }
 
     if !outcome.status.success() {
-        if let Some(failure_output) = &outcome.failure_output {
-            let trimmed = failure_output.trim();
-            if !trimmed.is_empty() {
-                eprintln!("{trimmed}");
-            }
-        }
+        common::print_trimmed_stderr(outcome.failure_output.as_deref());
     }
 
     Ok(CommandOutcome {
@@ -79,7 +75,7 @@ fn format_commit_success_output(outcome: &CommitOutcome) -> String {
         sections.push(format_restacked_branches(&outcome.restacked_branches));
     }
 
-    sections.join("\n\n")
+    common::join_sections(&sections)
 }
 
 fn format_recent_commits(commits: &[CommitEntry]) -> String {
@@ -127,16 +123,7 @@ fn format_reference(reference: &str) -> String {
 }
 
 fn format_restacked_branches(branches: &[RestackPreview]) -> String {
-    let mut lines = vec!["Restacked:".to_string()];
-
-    for branch in branches {
-        lines.push(format!(
-            "- {} onto {}",
-            branch.branch_name, branch.onto_branch
-        ));
-    }
-
-    lines.join("\n")
+    common::format_restacked_branches(branches)
 }
 
 #[cfg(test)]

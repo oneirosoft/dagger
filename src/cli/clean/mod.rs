@@ -1,9 +1,7 @@
-#[path = "clean/render.rs"]
 mod render;
 
 use std::io;
 use std::io::IsTerminal;
-use std::io::Write;
 use std::thread;
 use std::time::Duration;
 
@@ -13,6 +11,7 @@ use crate::core::clean::{self, CleanBlockReason, CleanOptions, CleanPlan, CleanR
 use crate::core::git;
 
 use super::CommandOutcome;
+use super::common;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct CleanArgs {
@@ -129,20 +128,13 @@ fn format_blocked_branch(blocked: &crate::core::clean::BlockedBranch) -> String 
 }
 
 fn confirm_cleanup(branch_count: usize) -> io::Result<bool> {
-    let mut stdout = io::stdout();
     let label = if branch_count == 1 {
         "branch"
     } else {
         "branches"
     };
 
-    write!(stdout, "Delete {branch_count} merged {label}? [y/N] ")?;
-    stdout.flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-
-    Ok(matches!(input.trim(), "y" | "Y" | "yes" | "YES" | "Yes"))
+    common::confirm_yes_no(&format!("Delete {branch_count} merged {label}? [y/N] "))
 }
 
 fn execute_with_animation(plan: &CleanPlan) -> io::Result<crate::core::clean::CleanApplyOutcome> {
@@ -174,13 +166,7 @@ fn execute_with_animation(plan: &CleanPlan) -> io::Result<crate::core::clean::Cl
         }
     } else {
         terminal.finish(&animation.render_active())?;
-
-        if let Some(failure_output) = &outcome.failure_output {
-            let trimmed = failure_output.trim();
-            if !trimmed.is_empty() {
-                eprintln!("{trimmed}");
-            }
-        }
+        common::print_trimmed_stderr(outcome.failure_output.as_deref());
     }
 
     Ok(outcome)
@@ -204,10 +190,7 @@ fn execute_without_animation(
         }
 
         if !outcome.restacked_branches.is_empty() {
-            println!("Restacked:");
-            for branch in &outcome.restacked_branches {
-                println!("- {} onto {}", branch.branch_name, branch.onto_branch);
-            }
+            println!("{}", common::format_restacked_branches(&outcome.restacked_branches));
         }
 
         if !outcome.deleted_branches.is_empty() {

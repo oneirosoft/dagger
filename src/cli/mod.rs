@@ -1,6 +1,7 @@
 mod adopt;
 mod branch;
 mod clean;
+mod common;
 mod commit;
 mod init;
 mod merge;

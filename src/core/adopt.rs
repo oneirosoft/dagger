@@ -6,9 +6,10 @@ use uuid::Uuid;
 use crate::core::branch;
 use crate::core::git;
 use crate::core::store::{
-    BranchAdoptedEvent, BranchNode, DigEvent, ParentRef, append_event, dig_paths, initialize_store,
-    load_config, load_state, now_unix_timestamp_secs, save_state,
+    BranchNode, ParentRef, now_unix_timestamp_secs, open_initialized, open_or_initialize,
+    record_branch_adopted,
 };
+use crate::core::workflow;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdoptOptions {
@@ -38,14 +39,8 @@ pub struct AdoptOutcome {
 }
 
 pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
-    let repo = git::resolve_repo_context()?;
-    let store_paths = dig_paths(&repo.git_dir);
     let original_branch = git::current_branch_name()?;
-    initialize_store(&store_paths, &original_branch)?;
-
-    let config =
-        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig config is missing"))?;
-    let state = load_state(&store_paths)?;
+    let (session, _) = open_or_initialize(&original_branch)?;
     let branch_name = resolve_branch_name(&original_branch, options.branch_name.as_deref())?;
     let parent_branch_name = options.parent_branch_name.trim();
 
@@ -56,10 +51,10 @@ pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
         ));
     }
 
-    if branch_name == config.trunk_branch {
+    if branch_name == session.config.trunk_branch {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("cannot adopt trunk branch '{}'", config.trunk_branch),
+            format!("cannot adopt trunk branch '{}'", session.config.trunk_branch),
         ));
     }
 
@@ -77,7 +72,7 @@ pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
         ));
     }
 
-    if state.find_branch_by_name(&branch_name).is_some() {
+    if session.state.find_branch_by_name(&branch_name).is_some() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             format!("branch '{}' is already tracked by dig", branch_name),
@@ -91,12 +86,12 @@ pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
         ));
     }
 
-    let parent = branch::resolve_parent_ref(&state, &config, parent_branch_name)?;
+    let parent = branch::resolve_parent_ref(&session.state, &session.config, parent_branch_name)?;
     let old_upstream_oid = git::merge_base(parent_branch_name, &branch_name)?;
     let parent_head_oid = git::ref_oid(parent_branch_name)?;
 
     Ok(AdoptPlan {
-        trunk_branch: config.trunk_branch,
+        trunk_branch: session.config.trunk_branch,
         original_branch,
         branch_name,
         parent_branch_name: parent_branch_name.to_string(),
@@ -107,23 +102,21 @@ pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
 }
 
 pub fn apply(plan: &AdoptPlan) -> io::Result<AdoptOutcome> {
-    let repo = git::resolve_repo_context()?;
-    git::ensure_clean_worktree("adopt")?;
-    git::ensure_no_in_progress_operations(&repo, "adopt")?;
+    let mut session = open_initialized("dig is not initialized")?;
+    workflow::ensure_ready_for_operation(&session.repo, "adopt")?;
 
-    let store_paths = dig_paths(&repo.git_dir);
-    let config =
-        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig is not initialized"))?;
-    let mut state = load_state(&store_paths)?;
-
-    if state.find_branch_by_name(&plan.branch_name).is_some() {
+    if session.state.find_branch_by_name(&plan.branch_name).is_some() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             format!("branch '{}' is already tracked by dig", plan.branch_name),
         ));
     }
 
-    let resolved_parent = branch::resolve_parent_ref(&state, &config, &plan.parent_branch_name)?;
+    let resolved_parent = branch::resolve_parent_ref(
+        &session.state,
+        &session.config,
+        &plan.parent_branch_name,
+    )?;
     if resolved_parent != plan.parent {
         return Err(io::Error::other(format!(
             "tracked parent for '{}' changed while planning adopt",
@@ -144,9 +137,8 @@ pub fn apply(plan: &AdoptPlan) -> io::Result<AdoptOutcome> {
         status = rebase_output.status;
 
         if !status.success() {
-            abort_rebase_if_needed(&repo)?;
-            let restored_original_branch =
-                restore_original_branch_if_needed(&plan.original_branch)?;
+            abort_rebase_if_needed(&session.repo)?;
+            let restored_original_branch = restore_original_branch_if_needed(&plan.original_branch)?;
 
             return Ok(AdoptOutcome {
                 status,
@@ -174,15 +166,7 @@ pub fn apply(plan: &AdoptPlan) -> io::Result<AdoptOutcome> {
         archived: false,
     };
 
-    state.insert_branch(adopted_node.clone())?;
-    save_state(&store_paths, &state)?;
-    append_event(
-        &store_paths,
-        &DigEvent::BranchAdopted(BranchAdoptedEvent {
-            occurred_at_unix_secs: now_unix_timestamp_secs(),
-            node: adopted_node,
-        }),
-    )?;
+    record_branch_adopted(&mut session, adopted_node)?;
 
     let restored_original_branch = restore_original_branch_if_needed(&plan.original_branch)?;
 
@@ -231,41 +215,31 @@ fn abort_rebase_if_needed(repo: &git::RepoContext) -> io::Result<()> {
 }
 
 fn restore_original_branch_if_needed(original_branch: &str) -> io::Result<Option<String>> {
-    let current_branch = git::current_branch_name_if_any()?;
-    if current_branch.as_deref() == Some(original_branch) {
-        return Ok(None);
+    if let Some(outcome) = workflow::restore_original_branch_if_needed(original_branch)? {
+        if !outcome.status.success() {
+            return Err(io::Error::other(format!(
+                "adopt completed, but failed to return to '{}'",
+                original_branch
+            )));
+        }
+
+        return Ok(Some(outcome.restored_branch));
     }
 
-    if !git::branch_exists(original_branch)? {
-        return Ok(None);
-    }
-
-    let status = git::switch_branch(original_branch)?;
-    if !status.success() {
-        return Err(io::Error::other(format!(
-            "adopt completed, but failed to return to '{}'",
-            original_branch
-        )));
-    }
-
-    Ok(Some(original_branch.to_string()))
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::env;
     use std::fs;
     use std::io;
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-    use std::path::Path;
-    use std::process::Command;
-
-    use uuid::Uuid;
 
     use super::{AdoptOptions, apply, plan, resolve_branch_name};
-    use crate::core::branch::{self, BranchOptions};
     use crate::core::git;
     use crate::core::store::{DigEvent, ParentRef, dig_paths, load_state};
+    use crate::core::test_support::{
+        commit_file, create_tracked_branch, git_ok, initialize_main_repo, with_temp_repo,
+    };
 
     #[test]
     fn resolves_requested_branch_or_current_branch() {
@@ -281,7 +255,7 @@ mod tests {
 
     #[test]
     fn rejects_tracked_branch_adoption() {
-        with_temp_repo(|repo| {
+        with_temp_repo("dig-adopt", |repo| {
             initialize_main_repo(repo);
             create_tracked_branch("feat/auth");
 
@@ -301,7 +275,7 @@ mod tests {
 
     #[test]
     fn rejects_adopting_trunk_branch() {
-        with_temp_repo(|repo| {
+        with_temp_repo("dig-adopt", |repo| {
             initialize_main_repo(repo);
 
             let error = plan(&AdoptOptions {
@@ -317,7 +291,7 @@ mod tests {
 
     #[test]
     fn rejects_untracked_parent_branch() {
-        with_temp_repo(|repo| {
+        with_temp_repo("dig-adopt", |repo| {
             initialize_main_repo(repo);
             git_ok(repo, &["checkout", "-b", "feat/child"]);
             git_ok(repo, &["checkout", "main"]);
@@ -338,7 +312,7 @@ mod tests {
 
     #[test]
     fn plans_rebase_for_sibling_branch_adoption() {
-        with_temp_repo(|repo| {
+        with_temp_repo("dig-adopt", |repo| {
             initialize_main_repo(repo);
             create_tracked_branch("feat/auth");
             commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -362,7 +336,7 @@ mod tests {
 
     #[test]
     fn adopts_branch_and_records_post_adopt_metadata() {
-        with_temp_repo(|repo| {
+        with_temp_repo("dig-adopt", |repo| {
             initialize_main_repo(repo);
             create_tracked_branch("feat/auth");
             commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -407,68 +381,5 @@ mod tests {
                     .unwrap_or(false)
             }));
         });
-    }
-
-    fn with_temp_repo(test: impl FnOnce(&Path)) {
-        let guard = crate::core::test_cwd_lock().lock().unwrap();
-        let original_dir = env::current_dir().unwrap();
-        let repo_dir = env::temp_dir().join(format!("dig-adopt-{}", Uuid::new_v4()));
-        fs::create_dir_all(&repo_dir).unwrap();
-
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            env::set_current_dir(&repo_dir).unwrap();
-            test(&repo_dir);
-        }));
-
-        env::set_current_dir(original_dir).unwrap();
-        fs::remove_dir_all(&repo_dir).unwrap();
-        drop(guard);
-
-        if let Err(payload) = result {
-            std::panic::resume_unwind(payload);
-        }
-    }
-
-    fn initialize_main_repo(repo: &Path) {
-        git_ok(repo, &["init", "--quiet"]);
-        git_ok(repo, &["checkout", "-b", "main"]);
-        git_ok(repo, &["config", "user.name", "Dig Test"]);
-        git_ok(repo, &["config", "user.email", "dig@example.com"]);
-        git_ok(repo, &["config", "commit.gpgsign", "false"]);
-        commit_file(repo, "README.md", "root\n", "chore: init");
-    }
-
-    fn create_tracked_branch(branch_name: &str) {
-        branch::run(&BranchOptions {
-            name: branch_name.into(),
-            parent_branch_name: None,
-        })
-        .unwrap();
-    }
-
-    fn commit_file(repo: &Path, file_name: &str, contents: &str, message: &str) {
-        fs::write(repo.join(file_name), contents).unwrap();
-        git_ok(repo, &["add", file_name]);
-        git_ok(
-            repo,
-            &[
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "--quiet",
-                "-m",
-                message,
-            ],
-        );
-    }
-
-    fn git_ok(repo: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .current_dir(repo)
-            .args(args)
-            .status()
-            .unwrap();
-
-        assert!(status.success(), "git {:?} failed", args);
     }
 }

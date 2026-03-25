@@ -63,6 +63,17 @@ pub fn overwrite_file(repo: &Path, file_name: &str, contents: &str, message: &st
     );
 }
 
+pub fn append_to_file(repo: &Path, file_name: &str, contents: &str) {
+    let path = repo.join(file_name);
+    let mut existing = fs::read_to_string(&path).unwrap();
+    existing.push_str(contents);
+    fs::write(path, existing).unwrap();
+}
+
+pub fn write_file(repo: &Path, file_name: &str, contents: &str) {
+    fs::write(repo.join(file_name), contents).unwrap();
+}
+
 pub fn dig(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_dig"))
         .current_dir(repo)
@@ -151,4 +162,25 @@ pub fn strip_ansi(text: &str) -> String {
     }
 
     stripped
+}
+
+pub fn active_rebase_head_name(repo: &Path) -> String {
+    for relative_path in ["rebase-merge/head-name", "rebase-apply/head-name"] {
+        let path = repo.join(".git").join(relative_path);
+        if path.exists() {
+            return fs::read_to_string(path).unwrap();
+        }
+    }
+
+    panic!("expected an active rebase head-name file");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_ansi;
+
+    #[test]
+    fn strips_basic_ansi_sequences() {
+        assert_eq!(strip_ansi("\u{1b}[32mhello\u{1b}[0m"), "hello");
+    }
 }

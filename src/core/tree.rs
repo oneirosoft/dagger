@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::core::git;
 use crate::core::store::types::DigState;
-use crate::core::store::{BranchNode, ParentRef, dig_paths, load_config, load_state};
+use crate::core::store::{BranchNode, ParentRef, open_initialized};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TreeOptions {
@@ -39,26 +39,22 @@ pub struct TreeOutcome {
 }
 
 pub fn run(options: &TreeOptions) -> io::Result<TreeOutcome> {
-    let repo = git::resolve_repo_context()?;
     let status = git::probe_repo_status()?;
-    let store_paths = dig_paths(&repo.git_dir);
-    let config =
-        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig is not initialized"))?;
-    let state = load_state(&store_paths)?;
+    let session = open_initialized("dig is not initialized")?;
     let current_branch = git::current_branch_name_if_any()?;
-    let full_view = build_tree_view(&state, &config.trunk_branch, current_branch.as_deref());
+    let full_view = build_tree_view(
+        &session.state,
+        &session.config.trunk_branch,
+        current_branch.as_deref(),
+    );
     let view = filter_tree_view(full_view, options.branch_name.as_deref())?;
 
     Ok(TreeOutcome { status, view })
 }
 
 pub(crate) fn focused_context_view(branch_name: &str) -> io::Result<TreeView> {
-    let repo = git::resolve_repo_context()?;
-    let store_paths = dig_paths(&repo.git_dir);
-    let config =
-        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig is not initialized"))?;
-    let state = load_state(&store_paths)?;
-    let full_view = build_tree_view(&state, &config.trunk_branch, None);
+    let session = open_initialized("dig is not initialized")?;
+    let full_view = build_tree_view(&session.state, &session.config.trunk_branch, None);
 
     focus_tree_view(full_view, branch_name)
 }

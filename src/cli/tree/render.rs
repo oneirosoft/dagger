@@ -1,4 +1,5 @@
-use crate::core::tree::{TreeLabel, TreeNode, TreeView};
+use crate::cli::common;
+use crate::core::tree::{TreeLabel, TreeView};
 use crate::ui::markers;
 use crate::ui::palette::Accent;
 
@@ -17,44 +18,16 @@ pub fn render_branch_lineage(lineage: &[String]) -> String {
 }
 
 pub fn render_stack_tree(view: &TreeView) -> String {
-    let mut lines = Vec::new();
-
-    if let Some(root_label) = &view.root_label {
-        lines.push(format_tree_label(root_label));
-    }
-
-    for (index, root) in view.roots.iter().enumerate() {
-        render_tree_node(root, "", index + 1 == view.roots.len(), &mut lines);
-    }
-
-    lines.join("\n")
+    common::render_tree(
+        view.root_label.as_ref().map(format_tree_label),
+        &view.roots,
+        &|node| format_branch_label(&node.branch_name, node.is_current),
+        &|node| node.children.as_slice(),
+    )
 }
 
 fn format_tree_label(root_label: &TreeLabel) -> String {
     format_branch_label(&root_label.branch_name, root_label.is_current)
-}
-
-fn render_tree_node(node: &TreeNode, prefix: &str, is_last: bool, lines: &mut Vec<String>) {
-    let connector = if is_last { "└──" } else { "├──" };
-    lines.push(format!(
-        "{prefix}{connector} {}",
-        format_branch_label(&node.branch_name, node.is_current)
-    ));
-
-    let child_prefix = if is_last {
-        format!("{prefix}    ")
-    } else {
-        format!("{prefix}│   ")
-    };
-
-    for (index, child) in node.children.iter().enumerate() {
-        render_tree_node(
-            child,
-            &child_prefix,
-            index + 1 == node.children.len(),
-            lines,
-        );
-    }
 }
 
 fn format_branch_label(branch_name: &str, is_current: bool) -> String {

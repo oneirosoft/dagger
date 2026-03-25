@@ -3,11 +3,12 @@ use std::process::ExitStatus;
 
 use uuid::Uuid;
 
+use crate::core::graph::BranchGraph;
 use crate::core::git;
 use crate::core::store::types::DigState;
 use crate::core::store::{
-    BranchCreatedEvent, BranchNode, DigConfig, DigEvent, ParentRef, append_event, dig_paths,
-    initialize_store, load_config, load_state, now_unix_timestamp_secs, save_state,
+    BranchNode, DigConfig, ParentRef, now_unix_timestamp_secs, open_or_initialize,
+    record_branch_created,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,16 +40,10 @@ pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
         ));
     }
 
-    let repo = git::resolve_repo_context()?;
-    let store_paths = dig_paths(&repo.git_dir);
     let current_branch = git::current_branch_name()?;
-    initialize_store(&store_paths, &current_branch)?;
+    let (mut session, _) = open_or_initialize(&current_branch)?;
 
-    let config =
-        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig config is missing"))?;
-    let mut state = load_state(&store_paths)?;
-
-    if state.find_branch_by_name(branch_name).is_some() {
+    if session.state.find_branch_by_name(branch_name).is_some() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             format!("branch '{branch_name}' is already tracked by dig"),
@@ -72,7 +67,7 @@ pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
         ));
     }
 
-    let parent = resolve_parent_ref(&state, &config, &parent_branch_name)?;
+    let parent = resolve_parent_ref(&session.state, &session.config, &parent_branch_name)?;
     let parent_head_oid = git::ref_oid(&parent_branch_name)?;
 
     let created_node = BranchNode {
@@ -96,20 +91,13 @@ pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
         });
     }
 
-    state.insert_branch(created_node.clone())?;
-    save_state(&store_paths, &state)?;
-    append_event(
-        &store_paths,
-        &DigEvent::BranchCreated(BranchCreatedEvent {
-            occurred_at_unix_secs: now_unix_timestamp_secs(),
-            node: created_node.clone(),
-        }),
-    )?;
+    record_branch_created(&mut session, created_node.clone())?;
+    let graph = BranchGraph::new(&session.state);
 
     Ok(BranchOutcome {
         status,
         created_node: Some(created_node),
-        lineage: state.branch_lineage(branch_name, &config.trunk_branch),
+        lineage: graph.lineage(branch_name, &session.config.trunk_branch),
     })
 }
 
