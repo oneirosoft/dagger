@@ -7,6 +7,7 @@ pub(crate) mod git;
 pub(crate) mod init;
 pub(crate) mod merge;
 pub(crate) mod restack;
+pub(crate) mod sync;
 pub(crate) mod store;
 #[cfg(test)]
 pub(crate) mod test_support;

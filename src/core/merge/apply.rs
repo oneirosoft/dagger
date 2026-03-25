@@ -5,12 +5,14 @@ use std::path::Path;
 use crate::core::git::{self, CommitMetadata};
 use crate::core::restack;
 use crate::core::store::{
-    BranchArchiveReason, open_initialized, record_branch_archived,
+    BranchArchiveReason, PendingMergeOperation, PendingOperationKind, PendingOperationState,
+    open_initialized, record_branch_archived,
 };
 use crate::core::workflow::{self, RestackExecutionEvent};
 
 use super::types::{
     DeleteMergedBranchOutcome, MergeEvent, MergeMode, MergeOutcome, MergePlan,
+    MergeResumeOutcome,
 };
 
 pub(crate) fn apply(plan: &MergePlan) -> io::Result<MergeOutcome> {
@@ -26,6 +28,7 @@ where
 {
     let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
     workflow::ensure_ready_for_operation(&session.repo, "merge")?;
+    workflow::ensure_no_pending_operation(&session.paths, "merge")?;
     let current_branch = git::current_branch_name()?;
     let source_commits = if plan.mode == MergeMode::Squash {
         git::commit_metadata_in_range(&format!(
@@ -49,6 +52,7 @@ where
                 switched_to_target_from: None,
                 restacked_branches: Vec::new(),
                 failure_output: None,
+                paused: false,
             });
         }
 
@@ -76,6 +80,7 @@ where
             switched_to_target_from,
             restacked_branches: Vec::new(),
             failure_output: Some(merge_output.combined_output()),
+            paused: false,
         });
     }
 
@@ -98,11 +103,15 @@ where
         &node.parent,
     )?;
 
-    let mut restacked_branches = Vec::new();
-    let mut last_status;
-
-    let restack_outcome = workflow::apply_restack_actions(
+    let restack_outcome = workflow::execute_resumable_restack_operation(
         &mut session,
+        PendingOperationKind::Merge(PendingMergeOperation {
+            trunk_branch: plan.trunk_branch.clone(),
+            source_branch_name: plan.source_branch_name.clone(),
+            target_branch_name: plan.target_branch_name.clone(),
+            source_node_id: plan.source_node_id,
+            switched_to_target_from: switched_to_target_from.clone(),
+        }),
         &restack_actions,
         &mut |event| match event {
             RestackExecutionEvent::Started(action) => reporter(MergeEvent::RebaseStarted {
@@ -125,16 +134,17 @@ where
             }
         },
     )?;
-    if !restack_outcome.status.success() {
+    if restack_outcome.paused {
         return Ok(MergeOutcome {
             status: restack_outcome.status,
             switched_to_target_from,
-            restacked_branches,
+            restacked_branches: restack_outcome.restacked_branches,
             failure_output: restack_outcome.failure_output,
+            paused: true,
         });
     }
-    last_status = restack_outcome.status;
-    restacked_branches.extend(restack_outcome.restacked_branches);
+    let mut last_status = restack_outcome.status;
+    let restacked_branches = restack_outcome.restacked_branches;
 
     let checkout = workflow::checkout_branch_if_needed(&plan.target_branch_name)?;
     if checkout.switched_from.is_some() {
@@ -144,6 +154,7 @@ where
                 switched_to_target_from,
                 restacked_branches,
                 failure_output: None,
+                paused: false,
             });
         }
 
@@ -155,14 +166,22 @@ where
         switched_to_target_from,
         restacked_branches,
         failure_output: None,
+        paused: false,
     })
 }
 
 pub(crate) fn delete_merged_branch(plan: &MergePlan) -> io::Result<DeleteMergedBranchOutcome> {
+    delete_merged_branch_by_id(plan.source_node_id, &plan.target_branch_name)
+}
+
+pub(crate) fn delete_merged_branch_by_id(
+    source_node_id: uuid::Uuid,
+    target_branch_name: &str,
+) -> io::Result<DeleteMergedBranchOutcome> {
     let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
     let node = session
         .state
-        .find_branch_by_id(plan.source_node_id)
+        .find_branch_by_id(source_node_id)
         .cloned()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "tracked branch was not found"))?;
 
@@ -179,13 +198,68 @@ pub(crate) fn delete_merged_branch(plan: &MergePlan) -> io::Result<DeleteMergedB
         node.id,
         node.branch_name.clone(),
         BranchArchiveReason::IntegratedIntoParent {
-            parent_branch: plan.target_branch_name.clone(),
+            parent_branch: target_branch_name.to_string(),
         },
     )?;
 
     Ok(DeleteMergedBranchOutcome {
         status,
         deleted_branch_name: Some(node.branch_name),
+    })
+}
+
+pub(crate) fn resume_after_sync(
+    pending_operation: PendingOperationState,
+    payload: PendingMergeOperation,
+) -> io::Result<MergeResumeOutcome> {
+    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let restack_outcome = workflow::continue_resumable_restack_operation(
+        &mut session,
+        pending_operation,
+        &mut |_| Ok(()),
+    )?;
+
+    if restack_outcome.paused {
+        return Ok(MergeResumeOutcome {
+            trunk_branch: payload.trunk_branch,
+            source_branch_name: payload.source_branch_name,
+            target_branch_name: payload.target_branch_name,
+            source_node_id: payload.source_node_id,
+            outcome: MergeOutcome {
+                status: restack_outcome.status,
+                switched_to_target_from: payload.switched_to_target_from,
+                restacked_branches: restack_outcome.restacked_branches,
+                failure_output: restack_outcome.failure_output,
+                paused: true,
+            },
+        });
+    }
+
+    let checkout = workflow::checkout_branch_if_needed(&payload.target_branch_name)?;
+    let status = if checkout.switched_from.is_some() {
+        checkout.status
+    } else {
+        restack_outcome.status
+    };
+    let target_branch_name = payload.target_branch_name.clone();
+
+    Ok(MergeResumeOutcome {
+        trunk_branch: payload.trunk_branch,
+        source_branch_name: payload.source_branch_name,
+        target_branch_name,
+        source_node_id: payload.source_node_id,
+        outcome: MergeOutcome {
+            status,
+            switched_to_target_from: payload.switched_to_target_from,
+            restacked_branches: restack_outcome.restacked_branches,
+            failure_output: (!status.success()).then(|| {
+                format!(
+                    "merge completed, but failed to return to '{}'",
+                    payload.target_branch_name
+                )
+            }),
+            paused: false,
+        },
     })
 }
 

@@ -29,6 +29,8 @@ pub fn execute(args: AdoptArgs) -> io::Result<CommandOutcome> {
         if !output.is_empty() {
             println!("{output}");
         }
+    } else if outcome.paused {
+        common::print_restack_pause_guidance(outcome.failure_output.as_deref());
     } else {
         common::print_trimmed_stderr(outcome.failure_output.as_deref());
     }
@@ -47,7 +49,7 @@ impl From<AdoptArgs> for AdoptOptions {
     }
 }
 
-fn format_adopt_success_output(outcome: &AdoptOutcome, rendered_tree: &str) -> String {
+pub(crate) fn format_adopt_success_output(outcome: &AdoptOutcome, rendered_tree: &str) -> String {
     let mut sections = Vec::new();
     let mut summary_lines = vec![format!(
         "Adopted '{}' under '{}'.",
@@ -103,6 +105,7 @@ mod tests {
                 restacked: true,
                 restored_original_branch: Some("feat/auth".into()),
                 failure_output: None,
+                paused: false,
             },
             "main\n└── feat/auth\n    └── feat/auth-ui",
         );

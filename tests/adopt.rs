@@ -1,8 +1,10 @@
 mod support;
 
 use support::{
-    commit_file, dig, dig_ok, events_contain_type, find_node, git_ok, git_stdout,
-    initialize_main_repo, load_state_json, overwrite_file, strip_ansi, with_temp_repo,
+    active_rebase_head_name, commit_file, dig, dig_ok, events_contain_type, find_node, git_ok,
+    git_stdout,
+    initialize_main_repo, load_operation_json, load_state_json, overwrite_file, strip_ansi,
+    with_temp_repo,
 };
 
 #[test]
@@ -59,7 +61,7 @@ fn adopts_named_branch_with_rebase_and_restores_original_branch() {
 }
 
 #[test]
-fn leaves_state_untouched_when_adopt_rebase_conflicts() {
+fn leaves_rebase_open_when_adopt_rebase_conflicts() {
     with_temp_repo("dig-adopt-cli", |repo| {
         initialize_main_repo(repo);
         dig_ok(repo, &["init"]);
@@ -71,13 +73,18 @@ fn leaves_state_untouched_when_adopt_rebase_conflicts() {
         git_ok(repo, &["checkout", "feat/auth"]);
 
         let output = dig(repo, &["adopt", "feat/auth-ui", "-p", "feat/auth"]);
+        let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(!output.status.success());
 
         let state = load_state_json(repo);
         assert!(find_node(&state, "feat/auth-ui").is_none());
         assert!(!events_contain_type(repo, "branch_adopted"));
-        assert!(!repo.join(".git/rebase-merge").exists());
-        assert!(!repo.join(".git/rebase-apply").exists());
-        assert_eq!(git_stdout(repo, &["branch", "--show-current"]), "feat/auth");
+        assert!(stderr.contains("dig sync --continue"));
+        assert!(repo.join(".git/rebase-merge").exists() || repo.join(".git/rebase-apply").exists());
+        assert!(load_operation_json(repo).is_some());
+        assert!(
+            active_rebase_head_name(repo).contains("feat/auth-ui"),
+            "expected rebase head-name to reference feat/auth-ui"
+        );
     });
 }

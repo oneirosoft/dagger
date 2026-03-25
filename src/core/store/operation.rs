@@ -55,6 +55,8 @@ mod tests {
         let operation = PendingOperationState::start(
             PendingOperationKind::Commit(PendingCommitOperation {
                 current_branch: "feat/auth".into(),
+                summary_line: Some("1 file changed".into()),
+                recent_commits: Vec::new(),
             }),
             vec![RestackAction {
                 node_id: Uuid::new_v4(),
@@ -83,6 +85,8 @@ mod tests {
         let operation = PendingOperationState::start(
             PendingOperationKind::Commit(PendingCommitOperation {
                 current_branch: "feat/auth".into(),
+                summary_line: Some("1 file changed".into()),
+                recent_commits: Vec::new(),
             }),
             vec![RestackAction {
                 node_id: Uuid::new_v4(),

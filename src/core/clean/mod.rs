@@ -2,7 +2,7 @@ mod apply;
 mod plan;
 mod types;
 
-pub(crate) use apply::{apply, apply_with_reporter};
+pub(crate) use apply::{apply, apply_with_reporter, resume_after_sync};
 pub(crate) use plan::plan;
 pub(crate) use types::{
     BlockedBranch, CleanApplyOutcome, CleanBlockReason, CleanCandidate, CleanEvent, CleanOptions,

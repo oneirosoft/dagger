@@ -5,8 +5,10 @@ use uuid::Uuid;
 
 use crate::core::branch;
 use crate::core::git;
+use crate::core::restack::RestackAction;
 use crate::core::store::{
-    BranchNode, ParentRef, now_unix_timestamp_secs, open_initialized, open_or_initialize,
+    BranchNode, ParentRef, PendingAdoptOperation, PendingOperationKind,
+    PendingOperationState, now_unix_timestamp_secs, open_initialized, open_or_initialize,
     record_branch_adopted,
 };
 use crate::core::workflow;
@@ -36,6 +38,7 @@ pub struct AdoptOutcome {
     pub restacked: bool,
     pub restored_original_branch: Option<String>,
     pub failure_output: Option<String>,
+    pub paused: bool,
 }
 
 pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
@@ -104,6 +107,7 @@ pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
 pub fn apply(plan: &AdoptPlan) -> io::Result<AdoptOutcome> {
     let mut session = open_initialized("dig is not initialized")?;
     workflow::ensure_ready_for_operation(&session.repo, "adopt")?;
+    workflow::ensure_no_pending_operation(&session.paths, "adopt")?;
 
     if session.state.find_branch_by_name(&plan.branch_name).is_some() {
         return Err(io::Error::new(
@@ -128,25 +132,35 @@ pub fn apply(plan: &AdoptPlan) -> io::Result<AdoptOutcome> {
     let mut restacked = false;
 
     if plan.requires_rebase {
-        let rebase_output = git::rebase_onto_with_progress(
-            &plan.parent_branch_name,
-            &plan.old_upstream_oid,
-            &plan.branch_name,
-            |_| Ok(()),
+        let rebase_outcome = workflow::execute_resumable_restack_operation(
+            &mut session,
+            PendingOperationKind::Adopt(PendingAdoptOperation {
+                original_branch: plan.original_branch.clone(),
+                branch_name: plan.branch_name.clone(),
+                parent_branch_name: plan.parent_branch_name.clone(),
+                parent: plan.parent.clone(),
+            }),
+            &[RestackAction {
+                node_id: Uuid::nil(),
+                branch_name: plan.branch_name.clone(),
+                old_upstream_branch_name: plan.parent_branch_name.clone(),
+                old_upstream_oid: plan.old_upstream_oid.clone(),
+                new_base_branch_name: plan.parent_branch_name.clone(),
+                new_parent: None,
+            }],
+            &mut |_| Ok(()),
         )?;
-        status = rebase_output.status;
+        status = rebase_outcome.status;
 
-        if !status.success() {
-            abort_rebase_if_needed(&session.repo)?;
-            let restored_original_branch = restore_original_branch_if_needed(&plan.original_branch)?;
-
+        if rebase_outcome.paused {
             return Ok(AdoptOutcome {
                 status,
                 branch_name: plan.branch_name.clone(),
                 parent_branch_name: plan.parent_branch_name.clone(),
                 restacked: false,
-                restored_original_branch,
-                failure_output: Some(rebase_output.stderr),
+                restored_original_branch: None,
+                failure_output: rebase_outcome.failure_output,
+                paused: true,
             });
         }
 
@@ -177,6 +191,7 @@ pub fn apply(plan: &AdoptPlan) -> io::Result<AdoptOutcome> {
         restacked,
         restored_original_branch,
         failure_output: None,
+        paused: false,
     })
 }
 
@@ -196,24 +211,6 @@ fn resolve_branch_name(
     Ok(branch_name.to_string())
 }
 
-fn abort_rebase_if_needed(repo: &git::RepoContext) -> io::Result<()> {
-    if !repo.git_dir.join("rebase-merge").exists()
-        && !repo.git_dir.join("rebase-apply").exists()
-        && !repo.git_dir.join("REBASE_HEAD").exists()
-    {
-        return Ok(());
-    }
-
-    let status = git::abort_rebase()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other(
-            "git rebase failed and 'git rebase --abort' did not succeed",
-        ))
-    }
-}
-
 fn restore_original_branch_if_needed(original_branch: &str) -> io::Result<Option<String>> {
     if let Some(outcome) = workflow::restore_original_branch_if_needed(original_branch)? {
         if !outcome.status.success() {
@@ -227,6 +224,56 @@ fn restore_original_branch_if_needed(original_branch: &str) -> io::Result<Option
     }
 
     Ok(None)
+}
+
+pub(crate) fn resume_after_sync(
+    pending_operation: PendingOperationState,
+    payload: PendingAdoptOperation,
+) -> io::Result<AdoptOutcome> {
+    let mut session = open_initialized("dig is not initialized")?;
+    let rebase_outcome = workflow::continue_resumable_restack_operation(
+        &mut session,
+        pending_operation,
+        &mut |_| Ok(()),
+    )?;
+
+    if rebase_outcome.paused {
+        return Ok(AdoptOutcome {
+            status: rebase_outcome.status,
+            branch_name: payload.branch_name,
+            parent_branch_name: payload.parent_branch_name,
+            restacked: false,
+            restored_original_branch: None,
+            failure_output: rebase_outcome.failure_output,
+            paused: true,
+        });
+    }
+
+    let parent_head_oid = git::ref_oid(&payload.parent_branch_name)?;
+    let branch_head_oid = git::ref_oid(&payload.branch_name)?;
+    let adopted_node = BranchNode {
+        id: Uuid::new_v4(),
+        branch_name: payload.branch_name.clone(),
+        parent: payload.parent.clone(),
+        base_ref: payload.parent_branch_name.clone(),
+        fork_point_oid: parent_head_oid,
+        head_oid_at_creation: branch_head_oid,
+        created_at_unix_secs: now_unix_timestamp_secs(),
+        archived: false,
+    };
+
+    record_branch_adopted(&mut session, adopted_node)?;
+    let restored_original_branch = restore_original_branch_if_needed(&payload.original_branch)?;
+
+    Ok(AdoptOutcome {
+        status: rebase_outcome.status,
+        branch_name: payload.branch_name,
+        parent_branch_name: payload.parent_branch_name,
+        restacked: true,
+        restored_original_branch,
+        failure_output: None,
+        paused: false,
+    })
 }
 
 #[cfg(test)]

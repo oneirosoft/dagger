@@ -3,7 +3,10 @@ use std::process::{Command, ExitStatus};
 
 use crate::core::git::{self, RepoContext};
 use crate::core::restack::{self, RestackPreview};
-use crate::core::store::{StoreSession, dig_paths, load_config, load_state};
+use crate::core::store::{
+    PendingCommitEntry, PendingCommitOperation, PendingOperationKind, PendingOperationState,
+    StoreSession, dig_paths, load_config, load_state, open_initialized,
+};
 use crate::core::workflow;
 
 pub const RECENT_COMMITS_LIMIT: usize = 5;
@@ -32,9 +35,11 @@ pub struct CommitOutcome {
     pub recent_commits: Vec<CommitEntry>,
     pub restacked_branches: Vec<RestackPreview>,
     pub failure_output: Option<String>,
+    pub paused: bool,
 }
 
 pub fn run(options: &CommitOptions) -> io::Result<CommitOutcome> {
+    ensure_no_pending_commit_operation()?;
     let pre_commit_context = resolve_pre_commit_context()?;
     let status = Command::new("git")
         .args(build_git_commit_args(options))
@@ -53,7 +58,11 @@ pub fn run(options: &CommitOptions) -> io::Result<CommitOutcome> {
         Vec::new()
     };
     let post_commit = if commit_succeeded {
-        maybe_restack_after_commit(pre_commit_context.as_ref())
+        maybe_restack_after_commit(
+            pre_commit_context.as_ref(),
+            summary_line.clone(),
+            recent_commits.clone(),
+        )
     } else {
         PostCommitRestackOutcome::default()
     };
@@ -65,7 +74,30 @@ pub fn run(options: &CommitOptions) -> io::Result<CommitOutcome> {
         recent_commits,
         restacked_branches: post_commit.restacked_branches,
         failure_output: post_commit.failure_output,
+        paused: post_commit.paused,
     })
+}
+
+impl From<CommitEntry> for PendingCommitEntry {
+    fn from(entry: CommitEntry) -> Self {
+        Self {
+            hash: entry.hash,
+            refs: entry.refs,
+            is_head: entry.is_head,
+            title: entry.title,
+        }
+    }
+}
+
+impl From<PendingCommitEntry> for CommitEntry {
+    fn from(entry: PendingCommitEntry) -> Self {
+        Self {
+            hash: entry.hash,
+            refs: entry.refs,
+            is_head: entry.is_head,
+            title: entry.title,
+        }
+    }
 }
 
 fn build_git_commit_args(options: &CommitOptions) -> Vec<String> {
@@ -205,6 +237,7 @@ struct PostCommitRestackOutcome {
     status_override: Option<ExitStatus>,
     restacked_branches: Vec<RestackPreview>,
     failure_output: Option<String>,
+    paused: bool,
 }
 
 impl PostCommitRestackOutcome {
@@ -213,8 +246,22 @@ impl PostCommitRestackOutcome {
             status_override: Some(synthetic_failure_status()),
             restacked_branches,
             failure_output: Some(failure_output),
+            paused: false,
         }
     }
+}
+
+fn ensure_no_pending_commit_operation() -> io::Result<()> {
+    let Some(repo) = git::try_resolve_repo_context()? else {
+        return Ok(());
+    };
+
+    let paths = dig_paths(&repo.git_dir);
+    if load_config(&paths)?.is_none() {
+        return Ok(());
+    }
+
+    workflow::ensure_no_pending_operation(&paths, "commit")
 }
 
 fn resolve_pre_commit_context() -> io::Result<Option<PreCommitContext>> {
@@ -229,8 +276,12 @@ fn resolve_pre_commit_context() -> io::Result<Option<PreCommitContext>> {
     }))
 }
 
-fn maybe_restack_after_commit(context: Option<&PreCommitContext>) -> PostCommitRestackOutcome {
-    match maybe_restack_after_commit_inner(context) {
+fn maybe_restack_after_commit(
+    context: Option<&PreCommitContext>,
+    summary_line: Option<String>,
+    recent_commits: Vec<CommitEntry>,
+) -> PostCommitRestackOutcome {
+    match maybe_restack_after_commit_inner(context, summary_line, recent_commits) {
         Ok(outcome) => outcome,
         Err(err) => PostCommitRestackOutcome::failure(Vec::new(), err.to_string()),
     }
@@ -238,6 +289,8 @@ fn maybe_restack_after_commit(context: Option<&PreCommitContext>) -> PostCommitR
 
 fn maybe_restack_after_commit_inner(
     context: Option<&PreCommitContext>,
+    summary_line: Option<String>,
+    recent_commits: Vec<CommitEntry>,
 ) -> io::Result<PostCommitRestackOutcome> {
     let Some(context) = context else {
         return Ok(PostCommitRestackOutcome::default());
@@ -270,8 +323,13 @@ fn maybe_restack_after_commit_inner(
         config,
         state,
     };
-    let restack_outcome = match workflow::apply_restack_actions(
+    let restack_outcome = match workflow::execute_resumable_restack_operation(
         &mut session,
+        PendingOperationKind::Commit(PendingCommitOperation {
+            current_branch: current_branch.to_string(),
+            summary_line,
+            recent_commits: recent_commits.into_iter().map(Into::into).collect(),
+        }),
         &actions,
         &mut |_| Ok(()),
     ) {
@@ -286,6 +344,7 @@ fn maybe_restack_after_commit_inner(
             status_override: Some(restack_outcome.status),
             restacked_branches: restack_outcome.restacked_branches,
             failure_output: restack_outcome.failure_output,
+            paused: restack_outcome.paused,
         });
     }
 
@@ -304,6 +363,7 @@ fn maybe_restack_after_commit_inner(
                         current_branch
                     )
                 }),
+                paused: false,
             });
         }
     }
@@ -312,6 +372,45 @@ fn maybe_restack_after_commit_inner(
         status_override: None,
         restacked_branches,
         failure_output: None,
+        paused: false,
+    })
+}
+
+pub(crate) fn resume_after_sync(
+    pending_operation: PendingOperationState,
+    payload: PendingCommitOperation,
+) -> io::Result<CommitOutcome> {
+    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let restack_outcome = workflow::continue_resumable_restack_operation(
+        &mut session,
+        pending_operation,
+        &mut |_| Ok(()),
+    )?;
+
+    let mut failure_output = restack_outcome.failure_output;
+    let status = if restack_outcome.paused {
+        restack_outcome.status
+    } else if !restack_outcome.restacked_branches.is_empty() {
+        let checkout = workflow::checkout_branch_if_needed(&payload.current_branch)?;
+        if checkout.switched_from.is_some() && !checkout.status.success() {
+            failure_output = Some(format!(
+                "commit succeeded, but failed to return to '{}' after restack",
+                payload.current_branch
+            ));
+        }
+        checkout.status
+    } else {
+        restack_outcome.status
+    };
+
+    Ok(CommitOutcome {
+        status,
+        commit_succeeded: true,
+        summary_line: payload.summary_line,
+        recent_commits: payload.recent_commits.into_iter().map(Into::into).collect(),
+        restacked_branches: restack_outcome.restacked_branches,
+        failure_output,
+        paused: restack_outcome.paused,
     })
 }
 

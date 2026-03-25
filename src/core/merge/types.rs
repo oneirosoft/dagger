@@ -45,6 +45,16 @@ pub(crate) struct MergeOutcome {
     pub switched_to_target_from: Option<String>,
     pub restacked_branches: Vec<RestackPreview>,
     pub failure_output: Option<String>,
+    pub paused: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct MergeResumeOutcome {
+    pub trunk_branch: String,
+    pub source_branch_name: String,
+    pub target_branch_name: String,
+    pub source_node_id: Uuid,
+    pub outcome: MergeOutcome,
 }
 
 #[derive(Debug)]

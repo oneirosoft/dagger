@@ -219,8 +219,13 @@ where
     })
 }
 
-pub fn abort_rebase() -> io::Result<ExitStatus> {
-    Command::new("git").args(["rebase", "--abort"]).status()
+pub fn continue_rebase() -> io::Result<GitCommandOutput> {
+    let output = Command::new("git")
+        .env("GIT_EDITOR", "true")
+        .args(["rebase", "--continue"])
+        .output()?;
+
+    output_to_git_command_output(output)
 }
 
 pub fn init_repository() -> io::Result<ExitStatus> {
@@ -280,6 +285,12 @@ pub fn ensure_no_in_progress_operations(repo: &RepoContext, command_name: &str) 
     }
 
     Ok(())
+}
+
+pub fn is_rebase_in_progress(repo: &RepoContext) -> bool {
+    repo.git_dir.join("REBASE_HEAD").exists()
+        || repo.git_dir.join("rebase-merge").exists()
+        || repo.git_dir.join("rebase-apply").exists()
 }
 
 pub fn cherry_markers(

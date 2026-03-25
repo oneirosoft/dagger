@@ -166,7 +166,11 @@ fn execute_with_animation(plan: &CleanPlan) -> io::Result<crate::core::clean::Cl
         }
     } else {
         terminal.finish(&animation.render_active())?;
-        common::print_trimmed_stderr(outcome.failure_output.as_deref());
+        if outcome.paused {
+            common::print_restack_pause_guidance(outcome.failure_output.as_deref());
+        } else {
+            common::print_trimmed_stderr(outcome.failure_output.as_deref());
+        }
     }
 
     Ok(outcome)
@@ -178,34 +182,54 @@ fn execute_without_animation(
     let outcome = clean::apply(plan)?;
 
     if outcome.status.success() {
-        if let Some(previous_branch) = outcome.switched_to_trunk_from.as_ref() {
-            println!(
-                "Switched from '{}' to '{}' before cleanup.",
-                previous_branch, plan.trunk_branch
-            );
+        let output = format_clean_success_output(&plan.trunk_branch, &outcome);
+        if !output.is_empty() {
+            println!("{output}");
         }
-
-        if let Some(restored_branch) = outcome.restored_original_branch.as_ref() {
-            println!("Returned to '{}' after cleanup.", restored_branch);
-        }
-
-        if !outcome.restacked_branches.is_empty() {
-            println!("{}", common::format_restacked_branches(&outcome.restacked_branches));
-        }
-
-        if !outcome.deleted_branches.is_empty() {
-            if !outcome.restacked_branches.is_empty() {
-                println!();
-            }
-
-            println!("Deleted:");
-            for branch_name in &outcome.deleted_branches {
-                println!("- {branch_name}");
-            }
-        }
+    } else if outcome.paused {
+        common::print_restack_pause_guidance(outcome.failure_output.as_deref());
+    } else {
+        common::print_trimmed_stderr(outcome.failure_output.as_deref());
     }
 
     Ok(outcome)
+}
+
+pub(crate) fn format_clean_success_output(
+    trunk_branch: &str,
+    outcome: &crate::core::clean::CleanApplyOutcome,
+) -> String {
+    let mut lines = Vec::new();
+
+    if let Some(previous_branch) = outcome.switched_to_trunk_from.as_ref() {
+        lines.push(format!(
+            "Switched from '{}' to '{}' before cleanup.",
+            previous_branch, trunk_branch
+        ));
+    }
+
+    if let Some(restored_branch) = outcome.restored_original_branch.as_ref() {
+        lines.push(format!("Returned to '{}' after cleanup.", restored_branch));
+    }
+
+    if !outcome.restacked_branches.is_empty() {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(common::format_restacked_branches(&outcome.restacked_branches));
+    }
+
+    if !outcome.deleted_branches.is_empty() {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("Deleted:".to_string());
+        for branch_name in &outcome.deleted_branches {
+            lines.push(format!("- {branch_name}"));
+        }
+    }
+
+    lines.join("\n")
 }
 
 #[cfg(test)]

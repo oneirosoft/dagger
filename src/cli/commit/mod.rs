@@ -41,7 +41,11 @@ pub fn execute(args: CommitArgs) -> io::Result<CommandOutcome> {
     }
 
     if !outcome.status.success() {
-        common::print_trimmed_stderr(outcome.failure_output.as_deref());
+        if outcome.paused {
+            common::print_restack_pause_guidance(outcome.failure_output.as_deref());
+        } else {
+            common::print_trimmed_stderr(outcome.failure_output.as_deref());
+        }
     }
 
     Ok(CommandOutcome {
@@ -60,7 +64,7 @@ impl From<CommitArgs> for CommitOptions {
     }
 }
 
-fn format_commit_success_output(outcome: &CommitOutcome) -> String {
+pub(crate) fn format_commit_success_output(outcome: &CommitOutcome) -> String {
     let mut sections = Vec::new();
 
     if let Some(summary_line) = &outcome.summary_line {
@@ -204,6 +208,7 @@ mod tests {
             }],
             restacked_branches: Vec::new(),
             failure_output: None,
+            paused: false,
         };
 
         assert_eq!(
@@ -237,6 +242,7 @@ mod tests {
                 },
             ],
             failure_output: Some("conflict".into()),
+            paused: true,
         };
 
         assert_eq!(

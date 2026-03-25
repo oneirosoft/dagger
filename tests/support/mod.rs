@@ -2,7 +2,8 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::io::Write;
+use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 use uuid::Uuid;
@@ -82,6 +83,26 @@ pub fn dig(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+pub fn dig_with_input(repo: &Path, args: &[&str], input: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dig"))
+        .current_dir(repo)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+
+    child.wait_with_output().unwrap()
+}
+
 pub fn dig_ok(repo: &Path, args: &[&str]) -> Output {
     let output = dig(repo, args);
     assert!(
@@ -118,6 +139,15 @@ pub fn git_stdout(repo: &Path, args: &[&str]) -> String {
 
 pub fn load_state_json(repo: &Path) -> Value {
     serde_json::from_str(&fs::read_to_string(repo.join(".git/dig/state.json")).unwrap()).unwrap()
+}
+
+pub fn load_operation_json(repo: &Path) -> Option<Value> {
+    let path = repo.join(".git/dig/operation.json");
+    if !path.exists() {
+        return None;
+    }
+
+    Some(serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap())
 }
 
 pub fn find_node<'a>(state: &'a Value, branch_name: &str) -> Option<&'a Value> {

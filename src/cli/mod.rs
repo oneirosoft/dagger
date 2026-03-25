@@ -6,6 +6,7 @@ mod commit;
 mod init;
 mod merge;
 mod operation;
+mod sync;
 mod tree;
 
 use std::io;
@@ -42,6 +43,9 @@ enum Commands {
     /// Merge a tracked branch into its tracked base and restack descendants
     Merge(merge::MergeArgs),
 
+    /// Continue a paused restack sequence
+    Sync(sync::SyncArgs),
+
     /// Print the tracked branch stacks as a shared tree from trunk
     Tree(tree::TreeArgs),
 }
@@ -61,6 +65,7 @@ pub fn run() -> ExitCode {
         Commands::Init(args) => init::execute(args),
         Commands::Commit(args) => commit::execute(args),
         Commands::Merge(args) => merge::execute(args),
+        Commands::Sync(args) => sync::execute(args),
         Commands::Tree(args) => tree::execute(args),
     };
 

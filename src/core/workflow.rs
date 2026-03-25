@@ -3,9 +3,10 @@ use std::process::ExitStatus;
 
 use crate::core::git::{self, RebaseProgress, RepoContext};
 use crate::core::restack::{self, RestackAction, RestackPreview};
+use crate::core::store::fs::DigPaths;
 use crate::core::store::{
-    PendingOperationKind, PendingOperationState, clear_operation, record_branch_reparented,
-    save_operation,
+    PendingOperationKind, PendingOperationState, clear_operation, load_operation,
+    record_branch_reparented, save_operation,
 };
 use crate::core::store::session::StoreSession;
 
@@ -19,13 +20,6 @@ pub(crate) struct CheckoutBranchOutcome {
 pub(crate) struct RestoreBranchOutcome {
     pub status: ExitStatus,
     pub restored_branch: String,
-}
-
-#[derive(Debug)]
-pub(crate) struct RestackExecutionOutcome {
-    pub status: ExitStatus,
-    pub restacked_branches: Vec<RestackPreview>,
-    pub failure_output: Option<String>,
 }
 
 #[derive(Debug)]
@@ -52,6 +46,20 @@ pub(crate) fn ensure_ready_for_operation(
 ) -> io::Result<()> {
     git::ensure_clean_worktree(command_name)?;
     git::ensure_no_in_progress_operations(repo, command_name)
+}
+
+pub(crate) fn ensure_no_pending_operation(
+    paths: &DigPaths,
+    command_name: &str,
+) -> io::Result<()> {
+    let Some(operation) = load_operation(paths)? else {
+        return Ok(());
+    };
+
+    Err(io::Error::other(format!(
+        "dig {command_name} cannot run while a dig {} operation is paused; run 'dig sync --continue'",
+        operation.origin.command_name()
+    )))
 }
 
 pub(crate) fn checkout_branch_if_needed(target_branch: &str) -> io::Result<CheckoutBranchOutcome> {
@@ -91,61 +99,6 @@ pub(crate) fn restore_original_branch_if_needed(
     }))
 }
 
-pub(crate) fn apply_restack_actions<F>(
-    session: &mut StoreSession,
-    actions: &[RestackAction],
-    on_event: &mut F,
-) -> io::Result<RestackExecutionOutcome>
-where
-    F: for<'a> FnMut(RestackExecutionEvent<'a>) -> io::Result<()>,
-{
-    let mut restacked_branches = Vec::new();
-    let mut last_status = git::success_status()?;
-
-    for action in actions {
-        on_event(RestackExecutionEvent::Started(action))?;
-
-        let outcome = restack::apply_action(&mut session.state, action, |progress| {
-            on_event(RestackExecutionEvent::Progress { action, progress })
-        })?;
-
-        if !outcome.status.success() {
-            return Ok(RestackExecutionOutcome {
-                status: outcome.status,
-                restacked_branches,
-                failure_output: Some(outcome.stderr),
-            });
-        }
-
-        on_event(RestackExecutionEvent::Completed(action))?;
-
-        if let Some(parent_change) = outcome.parent_change {
-            record_branch_reparented(
-                session,
-                parent_change.branch_id,
-                parent_change.branch_name,
-                parent_change.old_parent,
-                parent_change.new_parent,
-                parent_change.old_base_ref,
-                parent_change.new_base_ref,
-            )?;
-        }
-
-        restacked_branches.push(RestackPreview {
-            branch_name: outcome.branch_name,
-            onto_branch: outcome.onto_branch,
-            parent_changed: action.new_parent.is_some(),
-        });
-        last_status = outcome.status;
-    }
-
-    Ok(RestackExecutionOutcome {
-        status: last_status,
-        restacked_branches,
-        failure_output: None,
-    })
-}
-
 pub(crate) fn execute_resumable_restack_operation<F>(
     session: &mut StoreSession,
     origin: PendingOperationKind,
@@ -166,10 +119,63 @@ where
         });
     };
 
-    let mut last_status = git::success_status()?;
+    run_pending_restack_operation(session, &mut pending_operation, on_event)
+}
 
+pub(crate) fn continue_resumable_restack_operation<F>(
+    session: &mut StoreSession,
+    pending_operation: PendingOperationState,
+    on_event: &mut F,
+) -> io::Result<ResumableRestackExecutionOutcome>
+where
+    F: for<'a> FnMut(RestackExecutionEvent<'a>) -> io::Result<()>,
+{
+    let action = pending_operation.active_action().clone();
+    on_event(RestackExecutionEvent::Completed(&action))?;
+
+    if let Some(parent_change) = restack::finalize_action(&mut session.state, &action)? {
+        record_branch_reparented(
+            session,
+            parent_change.branch_id,
+            parent_change.branch_name,
+            parent_change.old_parent,
+            parent_change.new_parent,
+            parent_change.old_base_ref,
+            parent_change.new_base_ref,
+        )?;
+    }
+
+    let mut completed_branches = pending_operation.completed_branches().to_vec();
+    let (preview, next_pending_operation) = pending_operation.advance_after_success();
+    completed_branches.push(preview);
+
+    match next_pending_operation {
+        Some(mut pending_operation) => {
+            run_pending_restack_operation(session, &mut pending_operation, on_event)
+        }
+        None => {
+            clear_operation(&session.paths)?;
+
+            Ok(ResumableRestackExecutionOutcome {
+                status: git::success_status()?,
+                restacked_branches: completed_branches,
+                failure_output: None,
+                paused: false,
+            })
+        }
+    }
+}
+
+fn run_pending_restack_operation<F>(
+    session: &mut StoreSession,
+    pending_operation: &mut PendingOperationState,
+    on_event: &mut F,
+) -> io::Result<ResumableRestackExecutionOutcome>
+where
+    F: for<'a> FnMut(RestackExecutionEvent<'a>) -> io::Result<()>,
+{
     loop {
-        save_operation(&session.paths, &pending_operation)?;
+        save_operation(&session.paths, pending_operation)?;
 
         let action = pending_operation.active_action().clone();
         on_event(RestackExecutionEvent::Started(&action))?;
@@ -205,20 +211,19 @@ where
         }
 
         let mut completed_branches = pending_operation.completed_branches().to_vec();
-        let (preview, next_pending_operation) = pending_operation.advance_after_success();
+        let (preview, next_pending_operation) = pending_operation.clone().advance_after_success();
         completed_branches.push(preview);
-        last_status = outcome.status;
 
         match next_pending_operation {
             Some(next_pending_operation) => {
-                pending_operation = next_pending_operation;
-                save_operation(&session.paths, &pending_operation)?;
+                *pending_operation = next_pending_operation;
+                save_operation(&session.paths, pending_operation)?;
             }
             None => {
                 clear_operation(&session.paths)?;
 
                 return Ok(ResumableRestackExecutionOutcome {
-                    status: last_status,
+                    status: outcome.status,
                     restacked_branches: completed_branches,
                     failure_output: None,
                     paused: false,
@@ -271,6 +276,8 @@ mod tests {
                 &mut session,
                 PendingOperationKind::Commit(PendingCommitOperation {
                     current_branch: "feat/auth".into(),
+                    summary_line: Some("1 file changed".into()),
+                    recent_commits: Vec::new(),
                 }),
                 &actions,
                 &mut |_| Ok(()),

@@ -4,7 +4,7 @@ use std::fs;
 
 use support::{
     active_rebase_head_name, append_to_file, commit_file, dig, dig_ok, git_ok, git_stdout,
-    initialize_main_repo, strip_ansi, with_temp_repo, write_file,
+    initialize_main_repo, load_operation_json, strip_ansi, with_temp_repo, write_file,
 };
 
 #[test]
@@ -138,7 +138,9 @@ fn leaves_rebase_open_on_conflicting_child_after_commit() {
         assert!(!output.status.success());
         assert!(stdout.contains("feat: parent follow-up"));
         assert!(stderr.contains("could not apply"));
+        assert!(stderr.contains("dig sync --continue"));
         assert!(repo.join(".git/rebase-merge").exists() || repo.join(".git/rebase-apply").exists());
+        assert!(load_operation_json(repo).is_some());
         assert!(
             active_rebase_head_name(repo).contains("feat/auth-ui"),
             "expected rebase head-name to reference feat/auth-ui"

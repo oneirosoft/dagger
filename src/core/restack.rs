@@ -39,8 +39,6 @@ pub struct ParentChange {
 #[derive(Debug)]
 pub struct RestackStepOutcome {
     pub status: ExitStatus,
-    pub branch_name: String,
-    pub onto_branch: String,
     pub parent_change: Option<ParentChange>,
     pub stderr: String,
 }
@@ -122,39 +120,42 @@ where
     if !status.success() {
         return Ok(RestackStepOutcome {
             status,
-            branch_name: action.branch_name.clone(),
-            onto_branch: action.new_base_branch_name.clone(),
             parent_change: None,
             stderr: result.stderr,
         });
     }
 
-    let parent_change = if let Some(new_parent) = &action.new_parent {
-        let (old_parent, old_base_ref) = state.reparent_branch(
-            action.node_id,
-            new_parent.clone(),
-            action.new_base_branch_name.clone(),
-        )?;
-
-        Some(ParentChange {
-            branch_id: action.node_id,
-            branch_name: action.branch_name.clone(),
-            old_parent,
-            new_parent: new_parent.clone(),
-            old_base_ref,
-            new_base_ref: action.new_base_branch_name.clone(),
-        })
-    } else {
-        None
-    };
+    let parent_change = finalize_action(state, action)?;
 
     Ok(RestackStepOutcome {
         status,
-        branch_name: action.branch_name.clone(),
-        onto_branch: action.new_base_branch_name.clone(),
         parent_change,
         stderr: result.stderr,
     })
+}
+
+pub fn finalize_action(
+    state: &mut DigState,
+    action: &RestackAction,
+) -> io::Result<Option<ParentChange>> {
+    let Some(new_parent) = &action.new_parent else {
+        return Ok(None);
+    };
+
+    let (old_parent, old_base_ref) = state.reparent_branch(
+        action.node_id,
+        new_parent.clone(),
+        action.new_base_branch_name.clone(),
+    )?;
+
+    Ok(Some(ParentChange {
+        branch_id: action.node_id,
+        branch_name: action.branch_name.clone(),
+        old_parent,
+        new_parent: new_parent.clone(),
+        old_base_ref,
+        new_base_ref: action.new_base_branch_name.clone(),
+    }))
 }
 
 fn collect_branch_advance_actions(

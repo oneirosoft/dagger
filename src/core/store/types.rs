@@ -181,6 +181,8 @@ impl PendingOperationKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingCommitOperation {
     pub current_branch: String,
+    pub summary_line: Option<String>,
+    pub recent_commits: Vec<PendingCommitEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,18 +196,29 @@ pub struct PendingAdoptOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingMergeOperation {
     pub trunk_branch: String,
-    pub current_branch: String,
     pub source_branch_name: String,
     pub target_branch_name: String,
     pub source_node_id: Uuid,
+    pub switched_to_target_from: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingCleanOperation {
     pub trunk_branch: String,
-    pub current_branch: String,
-    pub requested_branch_name: Option<String>,
+    pub original_branch: String,
+    pub switched_to_trunk_from: Option<String>,
+    pub current_candidate_branch_name: String,
     pub remaining_branch_names: Vec<String>,
+    pub deleted_branches: Vec<String>,
+    pub restacked_branches: Vec<RestackPreview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingCommitEntry {
+    pub hash: String,
+    pub refs: Vec<String>,
+    pub is_head: bool,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -374,6 +387,8 @@ mod tests {
         let operation = PendingOperationState::start(
             PendingOperationKind::Commit(PendingCommitOperation {
                 current_branch: "feature/api".into(),
+                summary_line: Some("1 file changed".into()),
+                recent_commits: Vec::new(),
             }),
             vec![first_action.clone(), second_action.clone()],
         )

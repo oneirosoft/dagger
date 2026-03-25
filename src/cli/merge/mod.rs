@@ -109,7 +109,7 @@ fn format_merge_plan(plan: &MergePlan) -> String {
     lines.join("\n")
 }
 
-fn confirm_delete_merged_branch(branch_name: &str) -> io::Result<bool> {
+pub(crate) fn confirm_delete_merged_branch(branch_name: &str) -> io::Result<bool> {
     common::confirm_yes_no(&format!("Delete merged branch '{branch_name}'? [y/N] "))
 }
 
@@ -130,7 +130,11 @@ fn execute_with_animation(plan: &MergePlan) -> io::Result<MergeOutcome> {
         terminal.finish(&animation.render_final())?;
     } else {
         terminal.finish(&animation.render_active())?;
-        common::print_trimmed_stderr(outcome.failure_output.as_deref());
+        if outcome.paused {
+            common::print_restack_pause_guidance(outcome.failure_output.as_deref());
+        } else {
+            common::print_trimmed_stderr(outcome.failure_output.as_deref());
+        }
     }
 
     Ok(outcome)
@@ -140,13 +144,17 @@ fn execute_without_animation(plan: &MergePlan) -> io::Result<MergeOutcome> {
     let outcome = merge::apply(plan)?;
 
     if !outcome.status.success() {
-        common::print_trimmed_stderr(outcome.failure_output.as_deref());
+        if outcome.paused {
+            common::print_restack_pause_guidance(outcome.failure_output.as_deref());
+        } else {
+            common::print_trimmed_stderr(outcome.failure_output.as_deref());
+        }
     }
 
     Ok(outcome)
 }
 
-fn load_relative_tree(current_branch: &str, trunk_branch: &str) -> io::Result<String> {
+pub(crate) fn load_relative_tree(current_branch: &str, trunk_branch: &str) -> io::Result<String> {
     let options = if current_branch == trunk_branch {
         TreeOptions::default()
     } else {
@@ -165,19 +173,35 @@ fn format_merge_success_output(
     deleted_branch_name: Option<&str>,
     rendered_tree: &str,
 ) -> String {
+    format_merge_resume_success_output(
+        &plan.source_branch_name,
+        &plan.target_branch_name,
+        outcome,
+        deleted_branch_name,
+        rendered_tree,
+    )
+}
+
+pub(crate) fn format_merge_resume_success_output(
+    source_branch_name: &str,
+    target_branch_name: &str,
+    outcome: &MergeOutcome,
+    deleted_branch_name: Option<&str>,
+    rendered_tree: &str,
+) -> String {
     let mut sections = Vec::new();
     let mut summary_lines = Vec::new();
 
     if let Some(previous_branch) = &outcome.switched_to_target_from {
         summary_lines.push(format!(
             "Switched from '{}' to '{}' before merge.",
-            previous_branch, plan.target_branch_name
+            previous_branch, target_branch_name
         ));
     }
 
     summary_lines.push(format!(
         "Merged '{}' into '{}'.",
-        plan.source_branch_name, plan.target_branch_name
+        source_branch_name, target_branch_name
     ));
 
     if !outcome.restacked_branches.is_empty() {
@@ -193,7 +217,7 @@ fn format_merge_success_output(
         }
         None => {
             summary_lines.push(String::new());
-            summary_lines.push(format!("Kept merged branch '{}'.", plan.source_branch_name));
+            summary_lines.push(format!("Kept merged branch '{}'.", source_branch_name));
         }
     }
 
@@ -289,6 +313,7 @@ mod tests {
                     parent_changed: true,
                 }],
                 failure_output: None,
+                paused: false,
             },
             Some("feat/auth-api"),
             "feat/auth\n└── feat/auth-api-tests",

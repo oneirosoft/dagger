@@ -69,6 +69,7 @@ pub(crate) struct CleanApplyOutcome {
     pub deleted_branches: Vec<String>,
     pub restacked_branches: Vec<RestackPreview>,
     pub failure_output: Option<String>,
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
