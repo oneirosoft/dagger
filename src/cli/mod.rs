@@ -1,3 +1,4 @@
+mod adopt;
 mod branch;
 mod clean;
 mod commit;
@@ -22,6 +23,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Adopt an existing local branch under a tracked dig parent
+    Adopt(adopt::AdoptArgs),
+
     /// Create a new branch from the currently checked out branch and track it in dig
     Branch(branch::BranchArgs),
 
@@ -50,6 +54,7 @@ pub fn run() -> ExitCode {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Commands::Adopt(args) => adopt::execute(args),
         Commands::Branch(args) => branch::execute(args),
         Commands::Clean(args) => clean::execute(args),
         Commands::Init(args) => init::execute(args),

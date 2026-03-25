@@ -46,7 +46,13 @@ impl Accent {
     }
 
     pub fn paint_struck_ansi(self, text: &str) -> String {
-        format!("{}{}{}{}", self.ansi(), ANSI_STRIKETHROUGH, text, ANSI_RESET)
+        format!(
+            "{}{}{}{}",
+            self.ansi(),
+            ANSI_STRIKETHROUGH,
+            text,
+            ANSI_RESET
+        )
     }
 }
 

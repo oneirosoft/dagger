@@ -2,7 +2,9 @@ use std::io;
 use std::process::ExitStatus;
 
 use crate::core::git;
-use crate::core::store::{dig_paths, initialize_store, load_config, load_state, StoreInitialization};
+use crate::core::store::{
+    StoreInitialization, dig_paths, initialize_store, load_config, load_state,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InitOptions {}
@@ -32,7 +34,8 @@ pub fn run(_: &InitOptions) -> io::Result<InitOutcome> {
     let current_branch = git::current_branch_name_or("main")?;
     let store_paths = dig_paths(&repo_context.git_dir);
     let store_initialization = initialize_store(&store_paths, &current_branch)?;
-    let config = load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig config is missing"))?;
+    let config =
+        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig config is missing"))?;
     let state = load_state(&store_paths)?;
 
     Ok(InitOutcome {

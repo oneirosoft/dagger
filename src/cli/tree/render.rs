@@ -56,7 +56,12 @@ fn render_tree_node(node: &TreeNode, prefix: &str, is_last: bool, lines: &mut Ve
     };
 
     for (index, child) in node.children.iter().enumerate() {
-        render_tree_node(child, &child_prefix, index + 1 == node.children.len(), lines);
+        render_tree_node(
+            child,
+            &child_prefix,
+            index + 1 == node.children.len(),
+            lines,
+        );
     }
 }
 

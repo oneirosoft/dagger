@@ -45,6 +45,9 @@ mod tests {
 
     #[test]
     fn converts_cli_args_into_core_init_options() {
-        assert_eq!(InitOptions::from(InitArgs::default()), InitOptions::default());
+        assert_eq!(
+            InitOptions::from(InitArgs::default()),
+            InitOptions::default()
+        );
     }
 }

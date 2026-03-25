@@ -219,6 +219,10 @@ where
     })
 }
 
+pub fn abort_rebase() -> io::Result<ExitStatus> {
+    Command::new("git").args(["rebase", "--abort"]).status()
+}
+
 pub fn init_repository() -> io::Result<ExitStatus> {
     Command::new("git").args(["init", "--quiet"]).status()
 }

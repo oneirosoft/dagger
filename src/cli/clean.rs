@@ -81,7 +81,10 @@ fn format_clean_plan(plan: &CleanPlan) -> String {
         ));
 
         for restack in &candidate.restack_plan {
-            lines.push(format!("  restack {} onto {}", restack.branch_name, restack.onto_branch));
+            lines.push(format!(
+                "  restack {} onto {}",
+                restack.branch_name, restack.onto_branch
+            ));
         }
     }
 
@@ -127,7 +130,11 @@ fn format_blocked_branch(blocked: &crate::core::clean::BlockedBranch) -> String 
 
 fn confirm_cleanup(branch_count: usize) -> io::Result<bool> {
     let mut stdout = io::stdout();
-    let label = if branch_count == 1 { "branch" } else { "branches" };
+    let label = if branch_count == 1 {
+        "branch"
+    } else {
+        "branches"
+    };
 
     write!(stdout, "Delete {branch_count} merged {label}? [y/N] ")?;
     stdout.flush()?;
@@ -179,7 +186,9 @@ fn execute_with_animation(plan: &CleanPlan) -> io::Result<crate::core::clean::Cl
     Ok(outcome)
 }
 
-fn execute_without_animation(plan: &CleanPlan) -> io::Result<crate::core::clean::CleanApplyOutcome> {
+fn execute_without_animation(
+    plan: &CleanPlan,
+) -> io::Result<crate::core::clean::CleanApplyOutcome> {
     let outcome = clean::apply(plan)?;
 
     if outcome.status.success() {
@@ -218,7 +227,7 @@ fn execute_without_animation(plan: &CleanPlan) -> io::Result<crate::core::clean:
 
 #[cfg(test)]
 mod tests {
-    use super::{format_blocked_branch, format_clean_plan, CleanArgs};
+    use super::{CleanArgs, format_blocked_branch, format_clean_plan};
     use crate::core::clean::{
         BlockedBranch, CleanBlockReason, CleanCandidate, CleanOptions, CleanPlan, CleanReason,
         CleanTreeNode,

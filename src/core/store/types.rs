@@ -44,8 +44,7 @@ impl DigState {
     }
 
     pub fn find_branch_by_id(&self, node_id: Uuid) -> Option<&BranchNode> {
-        self.active_nodes()
-            .find(|node| node.id == node_id)
+        self.active_nodes().find(|node| node.id == node_id)
     }
 
     pub fn find_branch_by_id_mut(&mut self, node_id: Uuid) -> Option<&mut BranchNode> {
@@ -139,7 +138,11 @@ impl DigState {
         }
     }
 
-    pub fn resolve_parent_branch_name(&self, node: &BranchNode, trunk_branch: &str) -> Option<String> {
+    pub fn resolve_parent_branch_name(
+        &self,
+        node: &BranchNode,
+        trunk_branch: &str,
+    ) -> Option<String> {
         match node.parent {
             ParentRef::Trunk => Some(trunk_branch.to_string()),
             ParentRef::Branch { node_id } => self
@@ -204,12 +207,19 @@ pub enum ParentRef {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DigEvent {
     BranchCreated(BranchCreatedEvent),
+    BranchAdopted(BranchAdoptedEvent),
     BranchArchived(BranchArchivedEvent),
     BranchReparented(BranchReparentedEvent),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BranchCreatedEvent {
+    pub occurred_at_unix_secs: u64,
+    pub node: BranchNode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BranchAdoptedEvent {
     pub occurred_at_unix_secs: u64,
     pub node: BranchNode,
 }
@@ -249,8 +259,8 @@ pub fn now_unix_timestamp_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        BranchArchiveReason, BranchArchivedEvent, BranchNode, DigConfig, DigEvent, DigState,
-        ParentRef, DIG_STATE_VERSION,
+        BranchAdoptedEvent, BranchArchiveReason, BranchArchivedEvent, BranchNode,
+        DIG_STATE_VERSION, DigConfig, DigEvent, DigState, ParentRef,
     };
     use uuid::Uuid;
 
@@ -275,10 +285,7 @@ mod tests {
 
     #[test]
     fn builds_config_with_trunk_branch() {
-        assert_eq!(
-            DigConfig::new("main".into()).trunk_branch,
-            "main"
-        );
+        assert_eq!(DigConfig::new("main".into()).trunk_branch, "main");
     }
 
     #[test]
@@ -363,7 +370,10 @@ mod tests {
         };
 
         assert_eq!(state.active_children_ids(parent_id), vec![child_id]);
-        assert_eq!(state.active_descendant_ids(parent_id), vec![child_id, grandchild_id]);
+        assert_eq!(
+            state.active_descendant_ids(parent_id),
+            vec![child_id, grandchild_id]
+        );
         assert_eq!(state.branch_depth(grandchild_id), 2);
     }
 
@@ -382,5 +392,27 @@ mod tests {
 
         assert!(serialized.contains("\"type\":\"branch_archived\""));
         assert!(serialized.contains("\"kind\":\"integrated_into_parent\""));
+    }
+
+    #[test]
+    fn serializes_branch_adopted_event() {
+        let event = DigEvent::BranchAdopted(BranchAdoptedEvent {
+            occurred_at_unix_secs: 1,
+            node: BranchNode {
+                id: Uuid::nil(),
+                branch_name: "feature/api".into(),
+                parent: ParentRef::Trunk,
+                base_ref: "main".into(),
+                fork_point_oid: "abc123".into(),
+                head_oid_at_creation: "def456".into(),
+                created_at_unix_secs: 1,
+                archived: false,
+            },
+        });
+
+        let serialized = serde_json::to_string(&event).unwrap();
+
+        assert!(serialized.contains("\"type\":\"branch_adopted\""));
+        assert!(serialized.contains("\"branch_name\":\"feature/api\""));
     }
 }

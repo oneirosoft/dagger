@@ -1,3 +1,4 @@
+pub(crate) mod adopt;
 pub(crate) mod branch;
 pub(crate) mod clean;
 pub(crate) mod commit;

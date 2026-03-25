@@ -75,15 +75,21 @@ fn build_git_commit_args(options: &CommitOptions) -> Vec<String> {
 
 fn load_commit_summary_line() -> io::Result<Option<String>> {
     let output = Command::new("git")
-        .args(["diff-tree", "--shortstat", "--no-commit-id", "--root", "HEAD"])
+        .args([
+            "diff-tree",
+            "--shortstat",
+            "--no-commit-id",
+            "--root",
+            "HEAD",
+        ])
         .output()?;
 
     if !output.status.success() {
         return Err(io::Error::other("git diff-tree --shortstat failed"));
     }
 
-    let stdout =
-        String::from_utf8(output.stdout).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     Ok(stdout.lines().find_map(|line| {
         let trimmed = line.trim();
@@ -93,15 +99,23 @@ fn load_commit_summary_line() -> io::Result<Option<String>> {
 
 fn load_recent_commits(limit: usize) -> io::Result<Vec<CommitEntry>> {
     let output = Command::new("git")
-        .args(["log", "--decorate=short", "--oneline", "-n", &limit.to_string()])
+        .args([
+            "log",
+            "--decorate=short",
+            "--oneline",
+            "-n",
+            &limit.to_string(),
+        ])
         .output()?;
 
     if !output.status.success() {
-        return Err(io::Error::other("git log --decorate=short --oneline failed"));
+        return Err(io::Error::other(
+            "git log --decorate=short --oneline failed",
+        ));
     }
 
-    let stdout =
-        String::from_utf8(output.stdout).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     Ok(parse_git_log_output(&stdout))
 }
@@ -164,7 +178,7 @@ fn parse_decorations(decorations: &str) -> (bool, Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_git_commit_args, parse_decorations, parse_git_log_output, CommitEntry, CommitOptions,
+        CommitEntry, CommitOptions, build_git_commit_args, parse_decorations, parse_git_log_output,
     };
 
     #[test]
@@ -226,7 +240,10 @@ mod tests {
     fn parses_head_and_tag_decorations() {
         assert_eq!(
             parse_decorations("HEAD -> main, tag: v0.1.0, origin/main"),
-            (true, vec!["main".into(), "tag: v0.1.0".into(), "origin/main".into()])
+            (
+                true,
+                vec!["main".into(), "tag: v0.1.0".into(), "origin/main".into()]
+            )
         );
     }
 }

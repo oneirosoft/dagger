@@ -114,7 +114,7 @@ fn format_reference(reference: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_commit_success_output, format_recent_commits, CommitArgs};
+    use super::{CommitArgs, format_commit_success_output, format_recent_commits};
     use crate::core::commit::{CommitEntry, CommitOptions, CommitOutcome};
     use std::os::unix::process::ExitStatusExt;
 

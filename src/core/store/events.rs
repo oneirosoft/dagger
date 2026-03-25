@@ -2,7 +2,7 @@ use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
 
-use super::fs::{ensure_store_dir, DigPaths};
+use super::fs::{DigPaths, ensure_store_dir};
 use super::types::DigEvent;
 
 pub fn append_event(paths: &DigPaths, event: &DigEvent) -> io::Result<()> {

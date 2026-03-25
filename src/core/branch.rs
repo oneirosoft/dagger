@@ -4,11 +4,11 @@ use std::process::ExitStatus;
 use uuid::Uuid;
 
 use crate::core::git;
-use crate::core::store::{
-    append_event, dig_paths, initialize_store, load_config, load_state, now_unix_timestamp_secs,
-    save_state, BranchCreatedEvent, BranchNode, DigConfig, DigEvent, ParentRef,
-};
 use crate::core::store::types::DigState;
+use crate::core::store::{
+    BranchCreatedEvent, BranchNode, DigConfig, DigEvent, ParentRef, append_event, dig_paths,
+    initialize_store, load_config, load_state, now_unix_timestamp_secs, save_state,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchOptions {
@@ -44,7 +44,8 @@ pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
     let current_branch = git::current_branch_name()?;
     initialize_store(&store_paths, &current_branch)?;
 
-    let config = load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig config is missing"))?;
+    let config =
+        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig config is missing"))?;
     let mut state = load_state(&store_paths)?;
 
     if state.find_branch_by_name(branch_name).is_some() {
@@ -54,7 +55,8 @@ pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
         ));
     }
 
-    let parent_branch_name = resolve_parent_branch_name(&current_branch, options.parent_branch_name.as_deref())?;
+    let parent_branch_name =
+        resolve_parent_branch_name(&current_branch, options.parent_branch_name.as_deref())?;
 
     if parent_branch_name == branch_name {
         return Err(io::Error::new(
@@ -127,7 +129,7 @@ fn resolve_parent_branch_name(
     Ok(parent_branch_name.to_string())
 }
 
-fn resolve_parent_ref(
+pub(crate) fn resolve_parent_ref(
     state: &DigState,
     config: &DigConfig,
     parent_branch_name: &str,
@@ -152,9 +154,9 @@ fn resolve_parent_ref(
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_parent_branch_name, resolve_parent_ref, BranchOptions};
-    use crate::core::store::{BranchNode, DigConfig, ParentRef};
+    use super::{BranchOptions, resolve_parent_branch_name, resolve_parent_ref};
     use crate::core::store::types::DigState;
+    use crate::core::store::{BranchNode, DigConfig, ParentRef};
     use uuid::Uuid;
 
     #[test]

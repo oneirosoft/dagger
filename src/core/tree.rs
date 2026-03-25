@@ -5,8 +5,8 @@ use std::process::ExitStatus;
 use uuid::Uuid;
 
 use crate::core::git;
-use crate::core::store::{dig_paths, load_config, load_state, BranchNode, ParentRef};
 use crate::core::store::types::DigState;
+use crate::core::store::{BranchNode, ParentRef, dig_paths, load_config, load_state};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TreeOptions {
@@ -42,16 +42,25 @@ pub fn run(options: &TreeOptions) -> io::Result<TreeOutcome> {
     let repo = git::resolve_repo_context()?;
     let status = git::probe_repo_status()?;
     let store_paths = dig_paths(&repo.git_dir);
-    let config = load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig is not initialized"))?;
+    let config =
+        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig is not initialized"))?;
     let state = load_state(&store_paths)?;
     let current_branch = git::current_branch_name_if_any()?;
     let full_view = build_tree_view(&state, &config.trunk_branch, current_branch.as_deref());
     let view = filter_tree_view(full_view, options.branch_name.as_deref())?;
 
-    Ok(TreeOutcome {
-        status,
-        view,
-    })
+    Ok(TreeOutcome { status, view })
+}
+
+pub(crate) fn focused_context_view(branch_name: &str) -> io::Result<TreeView> {
+    let repo = git::resolve_repo_context()?;
+    let store_paths = dig_paths(&repo.git_dir);
+    let config =
+        load_config(&store_paths)?.ok_or_else(|| io::Error::other("dig is not initialized"))?;
+    let state = load_state(&store_paths)?;
+    let full_view = build_tree_view(&state, &config.trunk_branch, None);
+
+    focus_tree_view(full_view, branch_name)
 }
 
 fn build_tree_view(state: &DigState, trunk_branch: &str, current_branch: Option<&str>) -> TreeView {
@@ -66,7 +75,10 @@ fn build_tree_view(state: &DigState, trunk_branch: &str, current_branch: Option<
         .map(|(index, node)| (node.id, index))
         .collect::<HashMap<_, _>>();
 
-    let known_ids = active_nodes.iter().map(|node| node.id).collect::<HashSet<_>>();
+    let known_ids = active_nodes
+        .iter()
+        .map(|node| node.id)
+        .collect::<HashSet<_>>();
     let mut child_lookup = HashMap::<Uuid, Vec<&BranchNode>>::new();
     let mut root_nodes = Vec::<&BranchNode>::new();
 
@@ -98,7 +110,10 @@ fn build_tree_view(state: &DigState, trunk_branch: &str, current_branch: Option<
 }
 
 fn filter_tree_view(view: TreeView, requested_branch: Option<&str>) -> io::Result<TreeView> {
-    let Some(requested_branch) = requested_branch.map(str::trim).filter(|branch| !branch.is_empty()) else {
+    let Some(requested_branch) = requested_branch
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+    else {
         return Ok(view);
     };
 
@@ -120,7 +135,10 @@ fn filter_tree_view(view: TreeView, requested_branch: Option<&str>) -> io::Resul
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("tracked branch '{}' was not found in dig tree", requested_branch),
+                format!(
+                    "tracked branch '{}' was not found in dig tree",
+                    requested_branch
+                ),
             )
         })?;
 
@@ -130,6 +148,46 @@ fn filter_tree_view(view: TreeView, requested_branch: Option<&str>) -> io::Resul
             is_current: selected_node.is_current,
         }),
         roots: selected_node.children.clone(),
+    })
+}
+
+fn focus_tree_view(view: TreeView, requested_branch: &str) -> io::Result<TreeView> {
+    let requested_branch = requested_branch.trim();
+    if requested_branch.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "branch name cannot be empty",
+        ));
+    }
+
+    let Some(root_label) = &view.root_label else {
+        return Ok(view);
+    };
+
+    if requested_branch == root_label.branch_name {
+        return Ok(view);
+    }
+
+    let mut focused_root = view
+        .roots
+        .iter()
+        .find_map(|root| prune_to_branch_path(root, requested_branch))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "tracked branch '{}' was not found in dig tree",
+                    requested_branch
+                ),
+            )
+        })?;
+
+    clear_current_flags(&mut focused_root);
+    mark_current_branch(&mut focused_root, requested_branch);
+
+    Ok(TreeView {
+        root_label: view.root_label,
+        roots: vec![focused_root],
     })
 }
 
@@ -165,25 +223,59 @@ fn find_tree_node<'a>(node: &'a TreeNode, branch_name: &str) -> Option<&'a TreeN
         .find_map(|child| find_tree_node(child, branch_name))
 }
 
+fn prune_to_branch_path(node: &TreeNode, branch_name: &str) -> Option<TreeNode> {
+    if node.branch_name == branch_name {
+        return Some(node.clone());
+    }
+
+    node.children.iter().find_map(|child| {
+        prune_to_branch_path(child, branch_name).map(|pruned_child| TreeNode {
+            branch_name: node.branch_name.clone(),
+            is_current: node.is_current,
+            children: vec![pruned_child],
+        })
+    })
+}
+
+fn clear_current_flags(node: &mut TreeNode) {
+    node.is_current = false;
+    for child in &mut node.children {
+        clear_current_flags(child);
+    }
+}
+
+fn mark_current_branch(node: &mut TreeNode, branch_name: &str) -> bool {
+    if node.branch_name == branch_name {
+        node.is_current = true;
+        return true;
+    }
+
+    for child in &mut node.children {
+        if mark_current_branch(child, branch_name) {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn sort_branch_nodes(nodes: &mut Vec<&BranchNode>, order_lookup: &HashMap<Uuid, usize>) {
     nodes.sort_by(|left, right| {
         left.created_at_unix_secs
             .cmp(&right.created_at_unix_secs)
-            .then_with(|| {
-                order_lookup
-                    .get(&left.id)
-                    .cmp(&order_lookup.get(&right.id))
-            })
+            .then_with(|| order_lookup.get(&left.id).cmp(&order_lookup.get(&right.id)))
             .then_with(|| left.branch_name.cmp(&right.branch_name))
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_tree_view, filter_tree_view, TreeLabel, TreeNode, TreeView};
+    use super::{
+        TreeLabel, TreeNode, TreeView, build_tree_view, filter_tree_view, focus_tree_view,
+    };
     use crate::core::store::types::DIG_STATE_VERSION;
-    use crate::core::store::{BranchNode, ParentRef};
     use crate::core::store::types::DigState;
+    use crate::core::store::{BranchNode, ParentRef};
     use uuid::Uuid;
 
     #[test]
@@ -306,6 +398,66 @@ mod tests {
                         children: vec![],
                     },
                 ],
+            }
+        );
+    }
+
+    #[test]
+    fn focuses_tree_to_selected_branch_context() {
+        let view = TreeView {
+            root_label: Some(TreeLabel {
+                branch_name: "main".into(),
+                is_current: false,
+            }),
+            roots: vec![
+                TreeNode {
+                    branch_name: "feat/auth".into(),
+                    is_current: false,
+                    children: vec![
+                        TreeNode {
+                            branch_name: "feat/auth-api".into(),
+                            is_current: false,
+                            children: vec![TreeNode {
+                                branch_name: "feat/auth-api-tests".into(),
+                                is_current: false,
+                                children: vec![],
+                            }],
+                        },
+                        TreeNode {
+                            branch_name: "feat/auth-ui".into(),
+                            is_current: false,
+                            children: vec![],
+                        },
+                    ],
+                },
+                TreeNode {
+                    branch_name: "feat/billing".into(),
+                    is_current: false,
+                    children: vec![],
+                },
+            ],
+        };
+
+        assert_eq!(
+            focus_tree_view(view, "feat/auth-api").unwrap(),
+            TreeView {
+                root_label: Some(TreeLabel {
+                    branch_name: "main".into(),
+                    is_current: false,
+                }),
+                roots: vec![TreeNode {
+                    branch_name: "feat/auth".into(),
+                    is_current: false,
+                    children: vec![TreeNode {
+                        branch_name: "feat/auth-api".into(),
+                        is_current: true,
+                        children: vec![TreeNode {
+                            branch_name: "feat/auth-api-tests".into(),
+                            is_current: false,
+                            children: vec![],
+                        }],
+                    }],
+                }],
             }
         );
     }
