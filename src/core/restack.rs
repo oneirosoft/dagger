@@ -1,6 +1,7 @@
 use std::io;
 use std::process::ExitStatus;
 
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::graph::BranchGraph;
@@ -8,7 +9,7 @@ use crate::core::git::{self, RebaseProgress};
 use crate::core::store::ParentRef;
 use crate::core::store::types::DigState;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestackAction {
     pub node_id: Uuid,
     pub branch_name: String,
@@ -18,7 +19,7 @@ pub struct RestackAction {
     pub new_parent: Option<ParentRef>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestackPreview {
     pub branch_name: String,
     pub onto_branch: String,

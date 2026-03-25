@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub struct DigPaths {
     pub root: PathBuf,
     pub config_file: PathBuf,
+    pub operation_file: PathBuf,
     pub state_file: PathBuf,
     pub events_file: PathBuf,
 }
@@ -17,6 +18,7 @@ pub fn dig_paths(git_dir: &Path) -> DigPaths {
 
     DigPaths {
         config_file: root.join("config.json"),
+        operation_file: root.join("operation.json"),
         state_file: root.join("state.json"),
         events_file: root.join("events.ndjson"),
         root,
