@@ -75,7 +75,7 @@ pub(crate) fn plan(options: &OrphanOptions) -> io::Result<OrphanPlan> {
         &session.state,
         node.id,
         &node.branch_name,
-        &parent_branch_name,
+        &restack::RestackBaseTarget::local(&parent_branch_name),
         &node.parent,
     )?);
 

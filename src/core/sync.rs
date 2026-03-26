@@ -1,3 +1,4 @@
+use std::collections::{BTreeSet, HashSet};
 use std::io;
 use std::process::ExitStatus;
 
@@ -46,6 +47,31 @@ pub struct SyncOutcome {
     pub paused: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemotePushActionKind {
+    CreateRemoteBranch,
+    ForceUpdateRemoteBranch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemotePushAction {
+    pub target: git::BranchPushTarget,
+    pub kind: RemotePushActionKind,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RemotePushPlan {
+    pub actions: Vec<RemotePushAction>,
+}
+
+#[derive(Debug)]
+pub struct RemotePushOutcome {
+    pub status: ExitStatus,
+    pub pushed_actions: Vec<RemotePushAction>,
+    pub failed_action: Option<RemotePushAction>,
+    pub failure_output: Option<String>,
+}
+
 #[derive(Debug, Default, Clone)]
 struct LocalSyncProgress {
     deleted_branches: Vec<String>,
@@ -55,6 +81,7 @@ struct LocalSyncProgress {
 #[derive(Debug)]
 struct LocalSyncOutcome {
     status: ExitStatus,
+    remote_sync_enabled: bool,
     deleted_branches: Vec<String>,
     restacked_branches: Vec<RestackPreview>,
     failure_output: Option<String>,
@@ -182,9 +209,15 @@ fn run_full_sync() -> io::Result<SyncOutcome> {
     let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
     workflow::ensure_ready_for_operation(&session.repo, "sync")?;
     workflow::ensure_no_pending_operation(&session.paths, "sync")?;
+    let remote_sync_enabled = fetch_sync_remotes(&session)?;
 
     let original_branch = git::current_branch_name()?;
-    let outcome = execute_local_sync(&mut session, original_branch, LocalSyncProgress::default())?;
+    let outcome = execute_local_sync(
+        &mut session,
+        original_branch,
+        LocalSyncProgress::default(),
+        remote_sync_enabled,
+    )?;
 
     finalize_full_sync_outcome(outcome)
 }
@@ -211,6 +244,7 @@ fn resume_full_sync(
     if restack_outcome.paused {
         return Ok(LocalSyncOutcome {
             status: restack_outcome.status,
+            remote_sync_enabled: payload.remote_sync_enabled,
             deleted_branches: progress.deleted_branches,
             restacked_branches: progress.restacked_branches,
             failure_output: restack_outcome.failure_output,
@@ -218,7 +252,12 @@ fn resume_full_sync(
         });
     }
 
-    execute_local_sync(&mut session, payload.original_branch, progress)
+    execute_local_sync(
+        &mut session,
+        payload.original_branch,
+        progress,
+        payload.remote_sync_enabled,
+    )
 }
 
 fn finalize_full_sync_outcome(outcome: LocalSyncOutcome) -> io::Result<SyncOutcome> {
@@ -231,7 +270,11 @@ fn finalize_full_sync_outcome(outcome: LocalSyncOutcome) -> io::Result<SyncOutco
         });
     }
 
-    let cleanup_plan = clean::plan(&CleanOptions::default())?;
+    let cleanup_plan = if outcome.remote_sync_enabled {
+        clean::plan_for_sync()?
+    } else {
+        clean::plan(&CleanOptions::default())?
+    };
 
     Ok(SyncOutcome {
         status: outcome.status,
@@ -249,12 +292,17 @@ fn execute_local_sync(
     session: &mut crate::core::store::StoreSession,
     original_branch: String,
     mut progress: LocalSyncProgress,
+    remote_sync_enabled: bool,
 ) -> io::Result<LocalSyncOutcome> {
     loop {
         if let Some(step) = plan_deleted_local_branch_step(session)? {
-            if let Some(outcome) =
-                apply_deleted_local_branch_step(session, &original_branch, &mut progress, step)?
-            {
+            if let Some(outcome) = apply_deleted_local_branch_step(
+                session,
+                &original_branch,
+                &mut progress,
+                step,
+                remote_sync_enabled,
+            )? {
                 return Ok(outcome);
             }
 
@@ -262,22 +310,27 @@ fn execute_local_sync(
         }
 
         if let Some(step) = plan_outdated_branch_step(session)? {
-            if let Some(outcome) =
-                apply_outdated_branch_step(session, &original_branch, &mut progress, step)?
-            {
+            if let Some(outcome) = apply_outdated_branch_step(
+                session,
+                &original_branch,
+                &mut progress,
+                step,
+                remote_sync_enabled,
+            )? {
                 return Ok(outcome);
             }
 
             continue;
         }
 
-        return finish_local_sync(&original_branch, progress);
+        return finish_local_sync(&original_branch, progress, remote_sync_enabled);
     }
 }
 
 fn finish_local_sync(
     original_branch: &str,
     progress: LocalSyncProgress,
+    remote_sync_enabled: bool,
 ) -> io::Result<LocalSyncOutcome> {
     let mut failure_output = None;
     let mut status = git::success_status()?;
@@ -294,6 +347,7 @@ fn finish_local_sync(
 
     Ok(LocalSyncOutcome {
         status,
+        remote_sync_enabled,
         deleted_branches: progress.deleted_branches,
         restacked_branches: progress.restacked_branches,
         failure_output,
@@ -312,6 +366,7 @@ fn apply_deleted_local_branch_step(
     original_branch: &str,
     progress: &mut LocalSyncProgress,
     step: deleted_local::DeletedLocalBranchStep,
+    remote_sync_enabled: bool,
 ) -> io::Result<Option<LocalSyncOutcome>> {
     let restack_actions = deleted_local::restack_actions_for_step(&session.state, &step)?;
 
@@ -325,6 +380,7 @@ fn apply_deleted_local_branch_step(
         PendingSyncPhase::ReconcileDeletedLocalBranches,
         &step.branch_name,
         &restack_actions,
+        remote_sync_enabled,
     )
 }
 
@@ -385,7 +441,7 @@ fn plan_outdated_branch_step(
             &node.branch_name,
             &old_upstream_oid,
             &old_head_oid,
-            &parent_branch_name,
+            &restack::RestackBaseTarget::local(&parent_branch_name),
         )?;
 
         return Ok(Some(OutdatedBranchStep {
@@ -402,6 +458,7 @@ fn apply_outdated_branch_step(
     original_branch: &str,
     progress: &mut LocalSyncProgress,
     step: OutdatedBranchStep,
+    remote_sync_enabled: bool,
 ) -> io::Result<Option<LocalSyncOutcome>> {
     execute_sync_restack_step(
         session,
@@ -410,6 +467,7 @@ fn apply_outdated_branch_step(
         PendingSyncPhase::RestackOutdatedLocalStacks,
         &step.branch_name,
         &step.actions,
+        remote_sync_enabled,
     )
 }
 
@@ -420,6 +478,7 @@ fn execute_sync_restack_step(
     phase: PendingSyncPhase,
     step_branch_name: &str,
     actions: &[RestackAction],
+    remote_sync_enabled: bool,
 ) -> io::Result<Option<LocalSyncOutcome>> {
     if actions.is_empty() {
         return Ok(None);
@@ -429,6 +488,7 @@ fn execute_sync_restack_step(
         session,
         PendingOperationKind::Sync(PendingSyncOperation {
             original_branch: original_branch.to_string(),
+            remote_sync_enabled,
             deleted_branches: progress.deleted_branches.clone(),
             restacked_branches: progress.restacked_branches.clone(),
             phase,
@@ -444,6 +504,7 @@ fn execute_sync_restack_step(
     if restack_outcome.paused {
         return Ok(Some(LocalSyncOutcome {
             status: restack_outcome.status,
+            remote_sync_enabled,
             deleted_branches: progress.deleted_branches.clone(),
             restacked_branches: progress.restacked_branches.clone(),
             failure_output: restack_outcome.failure_output,
@@ -452,4 +513,227 @@ fn execute_sync_restack_step(
     }
 
     Ok(None)
+}
+
+fn fetch_sync_remotes(session: &crate::core::store::StoreSession) -> io::Result<bool> {
+    let mut remote_names = BTreeSet::new();
+
+    for node in session.state.nodes.iter().filter(|node| !node.archived) {
+        if !git::branch_exists(&node.branch_name)? {
+            continue;
+        }
+
+        if let Some(target) = git::branch_push_target(&node.branch_name)? {
+            remote_names.insert(target.remote_name);
+        }
+    }
+
+    if remote_names.is_empty() {
+        return Ok(false);
+    }
+
+    for remote_name in remote_names {
+        let fetch_output = git::fetch_remote(&remote_name)?;
+        if !fetch_output.status.success() {
+            let combined_output = fetch_output.combined_output();
+            return Err(io::Error::other(if combined_output.is_empty() {
+                format!("git fetch --prune '{remote_name}' failed")
+            } else {
+                format!("git fetch --prune '{remote_name}' failed: {combined_output}")
+            }));
+        }
+    }
+
+    Ok(true)
+}
+
+pub fn plan_remote_pushes(
+    restacked_branch_names: &[String],
+    excluded_branch_names: &[String],
+) -> io::Result<RemotePushPlan> {
+    let session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let excluded_branch_names = excluded_branch_names
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    let mut planned_branch_names = HashSet::new();
+    let mut actions = Vec::new();
+
+    for branch_name in dedup_branch_names(restacked_branch_names) {
+        let Some(action) = plan_remote_push_action(
+            &branch_name,
+            &excluded_branch_names,
+            true,
+            &mut planned_branch_names,
+        )?
+        else {
+            continue;
+        };
+
+        actions.push(action);
+    }
+
+    let mut active_branch_names = session
+        .state
+        .nodes
+        .iter()
+        .filter(|node| !node.archived)
+        .map(|node| node.branch_name.clone())
+        .collect::<Vec<_>>();
+    active_branch_names.sort();
+
+    for branch_name in active_branch_names {
+        let Some(action) = plan_remote_push_action(
+            &branch_name,
+            &excluded_branch_names,
+            false,
+            &mut planned_branch_names,
+        )?
+        else {
+            continue;
+        };
+
+        actions.push(action);
+    }
+
+    Ok(RemotePushPlan { actions })
+}
+
+pub fn execute_remote_push_plan(plan: &RemotePushPlan) -> io::Result<RemotePushOutcome> {
+    let mut pushed_actions = Vec::new();
+
+    for action in &plan.actions {
+        let push_output = match action.kind {
+            RemotePushActionKind::CreateRemoteBranch => git::push_branch_to_remote(&action.target)?,
+            RemotePushActionKind::ForceUpdateRemoteBranch => {
+                git::force_push_branch_to_remote_with_lease(&action.target)?
+            }
+        };
+
+        if !push_output.status.success() {
+            return Ok(RemotePushOutcome {
+                status: push_output.status,
+                pushed_actions,
+                failed_action: Some(action.clone()),
+                failure_output: Some(push_output.combined_output()),
+            });
+        }
+
+        pushed_actions.push(action.clone());
+    }
+
+    Ok(RemotePushOutcome {
+        status: git::success_status()?,
+        pushed_actions,
+        failed_action: None,
+        failure_output: None,
+    })
+}
+
+fn dedup_branch_names(branch_names: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+
+    for branch_name in branch_names {
+        if seen.insert(branch_name.clone()) {
+            deduped.push(branch_name.clone());
+        }
+    }
+
+    deduped
+}
+
+fn plan_remote_push_action(
+    branch_name: &str,
+    excluded_branch_names: &HashSet<String>,
+    allow_force_update: bool,
+    planned_branch_names: &mut HashSet<String>,
+) -> io::Result<Option<RemotePushAction>> {
+    if excluded_branch_names.contains(branch_name)
+        || !planned_branch_names.insert(branch_name.into())
+    {
+        return Ok(None);
+    }
+
+    if !git::branch_exists(branch_name)? {
+        return Ok(None);
+    }
+
+    let Some(target) = git::branch_push_target(branch_name)? else {
+        return Ok(None);
+    };
+    let Some(remote_oid) =
+        git::remote_tracking_branch_oid(&target.remote_name, &target.branch_name)?
+    else {
+        return Ok(Some(RemotePushAction {
+            target,
+            kind: RemotePushActionKind::CreateRemoteBranch,
+        }));
+    };
+
+    if allow_force_update && remote_oid != git::ref_oid(branch_name)? {
+        return Ok(Some(RemotePushAction {
+            target,
+            kind: RemotePushActionKind::ForceUpdateRemoteBranch,
+        }));
+    }
+
+    Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RemotePushActionKind, plan_remote_pushes};
+    use crate::core::test_support::{
+        append_file, commit_file, create_tracked_branch, git_ok, initialize_main_repo,
+        with_temp_repo,
+    };
+
+    fn initialize_origin_remote(repo: &std::path::Path) {
+        git_ok(repo, &["init", "--bare", "origin.git"]);
+        git_ok(repo, &["remote", "add", "origin", "origin.git"]);
+        git_ok(repo, &["push", "-u", "origin", "main"]);
+    }
+
+    #[test]
+    fn plans_force_pushes_and_missing_remote_branches_while_excluding_cleanup_candidates() {
+        with_temp_repo("dig-sync-core", |repo| {
+            initialize_main_repo(repo);
+            initialize_origin_remote(repo);
+            create_tracked_branch("feat/auth");
+            commit_file(repo, "auth.txt", "auth\n", "feat: auth");
+            git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
+            create_tracked_branch("feat/auth-ui");
+            commit_file(repo, "ui.txt", "ui\n", "feat: auth ui");
+            git_ok(repo, &["checkout", "feat/auth"]);
+            append_file(
+                repo,
+                "auth.txt",
+                "auth local\n",
+                "feat: auth local follow-up",
+            );
+            create_tracked_branch("feat/merged");
+            commit_file(repo, "merged.txt", "merged\n", "feat: merged");
+
+            let plan = plan_remote_pushes(&["feat/auth".to_string()], &["feat/merged".to_string()])
+                .unwrap();
+
+            assert_eq!(plan.actions.len(), 2);
+            assert_eq!(plan.actions[0].target.branch_name, "feat/auth");
+            assert_eq!(
+                plan.actions[0].kind,
+                RemotePushActionKind::ForceUpdateRemoteBranch
+            );
+            assert_eq!(plan.actions[1].target.branch_name, "feat/auth-ui");
+            assert_eq!(
+                plan.actions[1].kind,
+                RemotePushActionKind::CreateRemoteBranch
+            );
+            assert!(
+                plan.actions
+                    .iter()
+                    .all(|action| action.target.branch_name != "feat/merged")
+            );
+        });
+    }
 }

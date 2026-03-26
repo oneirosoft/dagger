@@ -105,7 +105,7 @@ pub(crate) fn format_clean_plan(plan: &CleanPlan) -> String {
         for candidate in merged_candidates {
             let parent_branch = match &candidate.reason {
                 CleanReason::DeletedLocally => continue,
-                CleanReason::IntegratedIntoParent { parent_branch } => parent_branch,
+                CleanReason::IntegratedIntoParent { parent_base } => &parent_base.branch_name,
             };
 
             lines.push(format!(
@@ -306,7 +306,7 @@ mod tests {
         BlockedBranch, CleanBlockReason, CleanCandidate, CleanOptions, CleanPlan, CleanReason,
         CleanTreeNode,
     };
-    use crate::core::restack::RestackPreview;
+    use crate::core::restack::{RestackBaseTarget, RestackPreview};
     use uuid::Uuid;
 
     #[test]
@@ -331,7 +331,7 @@ mod tests {
                 branch_name: "feat/auth".into(),
                 parent_branch_name: "main".into(),
                 reason: CleanReason::IntegratedIntoParent {
-                    parent_branch: "main".into(),
+                    parent_base: RestackBaseTarget::local("main"),
                 },
                 tree: CleanTreeNode {
                     branch_name: "feat/auth".into(),

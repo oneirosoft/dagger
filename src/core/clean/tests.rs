@@ -1,11 +1,41 @@
-use super::plan::{parent_commit_mentions_all_branch_commits, plan as build_plan};
+use std::path::PathBuf;
+
+use super::plan::{
+    parent_commit_mentions_all_branch_commits, plan as build_plan, plan_for_sync as build_sync_plan,
+};
 use super::{BlockedBranch, CleanBlockReason, CleanOptions, CleanReason, apply};
 use crate::core::git::{self, CommitMetadata};
+use crate::core::restack::RestackBaseTarget;
 use crate::core::store::{ParentRef, dig_paths, load_state};
 use crate::core::test_support::{
     append_file, commit_file, create_tracked_branch, git_ok, initialize_main_repo,
     squash_merge_branch_with_commit_listing, with_temp_repo,
 };
+
+fn initialize_origin_remote(repo: &std::path::Path) {
+    git_ok(repo, &["init", "--bare", "origin.git"]);
+    git_ok(repo, &["remote", "add", "origin", "origin.git"]);
+    git_ok(repo, &["push", "-u", "origin", "main"]);
+    git_ok(
+        repo,
+        &[
+            "--git-dir=origin.git",
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/main",
+        ],
+    );
+}
+
+fn clone_origin(repo: &std::path::Path, clone_name: &str) -> PathBuf {
+    let clone_dir = repo.join(clone_name);
+    let clone_path = clone_dir.to_string_lossy().into_owned();
+    git_ok(repo, &["clone", "origin.git", &clone_path]);
+    git_ok(&clone_dir, &["config", "user.name", "Dig Remote"]);
+    git_ok(&clone_dir, &["config", "user.email", "remote@example.com"]);
+    git_ok(&clone_dir, &["config", "commit.gpgsign", "false"]);
+    clone_dir
+}
 
 #[test]
 fn reports_non_integrated_branch_reason() {
@@ -27,13 +57,13 @@ fn reports_non_integrated_branch_reason() {
 #[test]
 fn tracks_integrated_clean_reason() {
     let reason = CleanReason::IntegratedIntoParent {
-        parent_branch: "main".into(),
+        parent_base: RestackBaseTarget::local("main"),
     };
 
     assert_eq!(
         reason,
         CleanReason::IntegratedIntoParent {
-            parent_branch: "main".into()
+            parent_base: RestackBaseTarget::local("main")
         }
     );
 }
@@ -154,6 +184,79 @@ fn cleans_squash_merged_parent_and_restacks_descendants() {
                 .iter()
                 .any(|node| node.branch_name == "feat/auth" && node.archived)
         );
+    });
+}
+
+#[test]
+fn sync_plan_detects_remote_only_integrated_branch() {
+    with_temp_repo("dig-clean", |repo| {
+        initialize_main_repo(repo);
+        initialize_origin_remote(repo);
+        create_tracked_branch("feat/auth");
+        commit_file(repo, "auth.txt", "auth\n", "feat: auth");
+        git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
+        create_tracked_branch("feat/auth-ui");
+        commit_file(repo, "ui.txt", "ui\n", "feat: auth ui");
+
+        let remote_repo = clone_origin(repo, "origin-worktree");
+        git_ok(&remote_repo, &["checkout", "main"]);
+        git_ok(&remote_repo, &["merge", "--squash", "origin/feat/auth"]);
+        git_ok(
+            &remote_repo,
+            &["commit", "--quiet", "-m", "feat: merge auth"],
+        );
+        git_ok(&remote_repo, &["push", "origin", "main"]);
+        git_ok(repo, &["fetch", "--prune", "origin"]);
+
+        let local_plan = build_plan(&CleanOptions::default()).unwrap();
+        assert!(local_plan.candidates.is_empty());
+
+        let sync_plan = build_sync_plan().unwrap();
+        assert_eq!(
+            sync_plan
+                .candidates
+                .iter()
+                .map(|candidate| candidate.branch_name.clone())
+                .collect::<Vec<_>>(),
+            vec!["feat/auth".to_string()]
+        );
+        assert_eq!(
+            sync_plan.candidates[0]
+                .restack_plan
+                .iter()
+                .map(|step| format!("{}->{}", step.branch_name, step.onto_branch))
+                .collect::<Vec<_>>(),
+            vec!["feat/auth-ui->main".to_string()]
+        );
+        assert_eq!(
+            sync_plan.candidates[0].reason,
+            CleanReason::IntegratedIntoParent {
+                parent_base: RestackBaseTarget::with_rebase_ref("main", "origin/main"),
+            }
+        );
+    });
+}
+
+#[test]
+fn sync_plan_ignores_remote_integration_when_parent_remote_ref_is_missing() {
+    with_temp_repo("dig-clean", |repo| {
+        initialize_main_repo(repo);
+        initialize_origin_remote(repo);
+        create_tracked_branch("feat/auth");
+        commit_file(repo, "auth.txt", "auth\n", "feat: auth");
+        create_tracked_branch("feat/auth-api");
+        commit_file(repo, "api.txt", "api\n", "feat: auth api");
+
+        let sync_plan = build_sync_plan().unwrap();
+
+        assert!(sync_plan.candidates.is_empty());
+        assert!(sync_plan.blocked.iter().any(|blocked| {
+            blocked.branch_name == "feat/auth-api"
+                && blocked.reason
+                    == CleanBlockReason::NotIntegrated {
+                        parent_branch: "feat/auth".into(),
+                    }
+        }));
     });
 }
 

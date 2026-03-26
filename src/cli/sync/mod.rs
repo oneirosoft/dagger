@@ -4,7 +4,9 @@ use clap::Args;
 
 use crate::core::clean;
 use crate::core::merge;
-use crate::core::sync::{self, SyncCompletion, SyncOptions};
+use crate::core::sync::{
+    self, RemotePushActionKind, RemotePushOutcome, SyncCompletion, SyncOptions,
+};
 use crate::core::tree;
 
 use super::CommandOutcome;
@@ -102,12 +104,26 @@ pub fn execute(args: SyncArgs) -> io::Result<CommandOutcome> {
             }
             SyncCompletion::Full(full_outcome) if outcome.status.success() => {
                 let summary = format_full_sync_summary(full_outcome);
+                let mut printed_output = false;
+                let mut restacked_branch_names = full_outcome
+                    .restacked_branches
+                    .iter()
+                    .map(|branch| branch.branch_name.clone())
+                    .collect::<Vec<_>>();
+                let excluded_branch_names = full_outcome
+                    .cleanup_plan
+                    .candidates
+                    .iter()
+                    .map(|candidate| candidate.branch_name.clone())
+                    .collect::<Vec<_>>();
+
                 if !summary.is_empty() {
                     println!("{summary}");
+                    printed_output = true;
                 }
 
                 if !full_outcome.cleanup_plan.candidates.is_empty() {
-                    if !summary.is_empty() {
+                    if printed_output {
                         println!();
                     }
 
@@ -115,6 +131,7 @@ pub fn execute(args: SyncArgs) -> io::Result<CommandOutcome> {
                         "{}",
                         super::clean::format_clean_plan(&full_outcome.cleanup_plan)
                     );
+                    printed_output = true;
 
                     if !super::clean::confirm_cleanup(&full_outcome.cleanup_plan)? {
                         println!("Skipped cleanup.");
@@ -125,6 +142,12 @@ pub fn execute(args: SyncArgs) -> io::Result<CommandOutcome> {
                         final_status = clean_outcome.status;
 
                         if clean_outcome.status.success() {
+                            restacked_branch_names.extend(
+                                clean_outcome
+                                    .restacked_branches
+                                    .iter()
+                                    .map(|branch| branch.branch_name.clone()),
+                            );
                             let output = super::clean::format_clean_success_output(
                                 &full_outcome.cleanup_plan.trunk_branch,
                                 &clean_outcome,
@@ -138,6 +161,54 @@ pub fn execute(args: SyncArgs) -> io::Result<CommandOutcome> {
                             );
                         } else {
                             common::print_trimmed_stderr(clean_outcome.failure_output.as_deref());
+                        }
+                    }
+                }
+
+                if final_status.success() {
+                    let push_plan =
+                        sync::plan_remote_pushes(&restacked_branch_names, &excluded_branch_names)?;
+
+                    if !push_plan.actions.is_empty() {
+                        if printed_output {
+                            println!();
+                        }
+
+                        println!("{}", format_remote_push_plan(&push_plan));
+
+                        if !confirm_remote_pushes()? {
+                            println!("Skipped remote updates.");
+                        } else {
+                            println!();
+
+                            let push_outcome = sync::execute_remote_push_plan(&push_plan)?;
+                            final_status = push_outcome.status;
+
+                            if push_outcome.status.success() {
+                                let output = format_remote_push_success_output(&push_outcome);
+                                if !output.is_empty() {
+                                    println!("{output}");
+                                }
+                            } else {
+                                let output = format_partial_remote_push_output(
+                                    "Updated before failure:",
+                                    &push_outcome,
+                                );
+                                if !output.is_empty() {
+                                    println!("{output}");
+                                    println!();
+                                }
+                                if let Some(failed_action) = push_outcome.failed_action.as_ref() {
+                                    eprintln!(
+                                        "Failed to update '{}' on '{}'.",
+                                        failed_action.target.branch_name,
+                                        failed_action.target.remote_name
+                                    );
+                                }
+                                common::print_trimmed_stderr(
+                                    push_outcome.failure_output.as_deref(),
+                                );
+                            }
                         }
                     }
                 }
@@ -189,6 +260,51 @@ fn format_full_sync_summary(outcome: &sync::FullSyncOutcome) -> String {
     }
 
     common::join_sections(&sections)
+}
+
+fn format_remote_push_plan(plan: &sync::RemotePushPlan) -> String {
+    let mut lines = vec!["Remote branches to update:".to_string()];
+
+    for action in &plan.actions {
+        let action_label = match action.kind {
+            RemotePushActionKind::CreateRemoteBranch => "create",
+            RemotePushActionKind::ForceUpdateRemoteBranch => "force-push",
+        };
+        lines.push(format!(
+            "- {action_label} {} on {}",
+            action.target.branch_name, action.target.remote_name
+        ));
+    }
+
+    lines.join("\n")
+}
+
+fn confirm_remote_pushes() -> io::Result<bool> {
+    common::confirm_yes_no("Push these remote updates? [y/N] ")
+}
+
+fn format_remote_push_success_output(outcome: &RemotePushOutcome) -> String {
+    format_partial_remote_push_output("Updated remote branches:", outcome)
+}
+
+fn format_partial_remote_push_output(header: &str, outcome: &RemotePushOutcome) -> String {
+    if outcome.pushed_actions.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = vec![header.to_string()];
+    for action in &outcome.pushed_actions {
+        let action_label = match action.kind {
+            RemotePushActionKind::CreateRemoteBranch => "created",
+            RemotePushActionKind::ForceUpdateRemoteBranch => "force-pushed",
+        };
+        lines.push(format!(
+            "- {action_label} {} on {}",
+            action.target.branch_name, action.target.remote_name
+        ));
+    }
+
+    lines.join("\n")
 }
 
 #[cfg(test)]

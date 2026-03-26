@@ -340,13 +340,21 @@ pub fn commit_metadata_in_range(range_spec: &str) -> io::Result<Vec<CommitMetada
 }
 
 pub fn branch_push_target_if_needed(branch_name: &str) -> io::Result<Option<BranchPushTarget>> {
-    let Some(remote_name) = resolve_push_remote_name(branch_name)? else {
+    let Some(target) = branch_push_target(branch_name)? else {
         return Ok(None);
     };
 
-    if branch_head_is_pushed_to_remote(branch_name, &remote_name)? {
+    if branch_head_is_pushed_to_remote(&target.branch_name, &target.remote_name)? {
         return Ok(None);
     }
+
+    Ok(Some(target))
+}
+
+pub fn branch_push_target(branch_name: &str) -> io::Result<Option<BranchPushTarget>> {
+    let Some(remote_name) = resolve_push_remote_name(branch_name)? else {
+        return Ok(None);
+    };
 
     Ok(Some(BranchPushTarget {
         remote_name,
@@ -360,6 +368,73 @@ pub fn push_branch_to_remote(target: &BranchPushTarget) -> io::Result<GitCommand
         .output()?;
 
     output_to_git_command_output(output)
+}
+
+pub fn force_push_branch_to_remote_with_lease(
+    target: &BranchPushTarget,
+) -> io::Result<GitCommandOutput> {
+    let output = Command::new("git")
+        .args([
+            "push",
+            "--force-with-lease",
+            "-u",
+            &target.remote_name,
+            &target.branch_name,
+        ])
+        .output()?;
+
+    output_to_git_command_output(output)
+}
+
+pub fn fetch_remote(remote_name: &str) -> io::Result<GitCommandOutput> {
+    let output = Command::new("git")
+        .args(["fetch", "--prune", remote_name])
+        .output()?;
+
+    output_to_git_command_output(output)
+}
+
+pub fn remote_tracking_ref_name(remote_name: &str, branch_name: &str) -> String {
+    format!("refs/remotes/{remote_name}/{branch_name}")
+}
+
+pub fn remote_tracking_branch_ref(remote_name: &str, branch_name: &str) -> String {
+    format!("{remote_name}/{branch_name}")
+}
+
+pub fn remote_tracking_branch_exists(remote_name: &str, branch_name: &str) -> io::Result<bool> {
+    let status = Command::new("git")
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &remote_tracking_ref_name(remote_name, branch_name),
+        ])
+        .status()?;
+
+    Ok(status.success())
+}
+
+pub fn remote_tracking_branch_oid(
+    remote_name: &str,
+    branch_name: &str,
+) -> io::Result<Option<String>> {
+    let output = Command::new("git")
+        .args([
+            "rev-parse",
+            "--verify",
+            &remote_tracking_ref_name(remote_name, branch_name),
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+
+    Ok(Some(stdout.trim().to_string()))
 }
 
 fn resolve_push_remote_name(branch_name: &str) -> io::Result<Option<String>> {

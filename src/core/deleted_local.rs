@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::core::git;
 use crate::core::graph::{BranchGraph, BranchTreeNode};
-use crate::core::restack::{self, RestackAction, RestackPreview};
+use crate::core::restack::{self, RestackAction, RestackBaseTarget, RestackPreview};
 use crate::core::store::types::DigState;
 use crate::core::store::{BranchArchiveReason, ParentRef, StoreSession, record_branch_archived};
 
@@ -12,7 +12,7 @@ use crate::core::store::{BranchArchiveReason, ParentRef, StoreSession, record_br
 pub(crate) struct DeletedLocalBranchStep {
     pub node_id: Uuid,
     pub branch_name: String,
-    pub new_parent_branch_name: String,
+    pub new_parent_base: RestackBaseTarget,
     pub new_parent: ParentRef,
     pub tree: BranchTreeNode,
     pub restack_plan: Vec<RestackPreview>,
@@ -59,7 +59,7 @@ pub(crate) fn restack_actions_for_step(
         state,
         step.node_id,
         &step.branch_name,
-        &step.new_parent_branch_name,
+        &step.new_parent_base,
         &step.new_parent,
     )
 }
@@ -178,7 +178,7 @@ fn plan_deleted_local_step(
     Ok(DeletedLocalBranchStep {
         node_id: node.id,
         branch_name: node.branch_name.clone(),
-        new_parent_branch_name,
+        new_parent_base: new_parent_branch_name,
         new_parent,
         tree: graph.subtree(node.id)?,
         restack_plan,
@@ -205,12 +205,14 @@ fn resolve_replacement_parent(
     state: &DigState,
     trunk_branch: &str,
     parent: &ParentRef,
-) -> io::Result<(String, ParentRef)> {
+) -> io::Result<(RestackBaseTarget, ParentRef)> {
     let mut current_parent = parent.clone();
 
     loop {
         match current_parent {
-            ParentRef::Trunk => return Ok((trunk_branch.to_string(), ParentRef::Trunk)),
+            ParentRef::Trunk => {
+                return Ok((RestackBaseTarget::local(trunk_branch), ParentRef::Trunk));
+            }
             ParentRef::Branch { node_id } => {
                 let parent_node = state
                     .find_branch_by_id(node_id)
@@ -218,7 +220,7 @@ fn resolve_replacement_parent(
 
                 if !parent_node.archived && git::branch_exists(&parent_node.branch_name)? {
                     return Ok((
-                        parent_node.branch_name.clone(),
+                        RestackBaseTarget::local(&parent_node.branch_name),
                         ParentRef::Branch {
                             node_id: parent_node.id,
                         },

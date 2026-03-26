@@ -3,7 +3,7 @@ use std::process::ExitStatus;
 use uuid::Uuid;
 
 use crate::core::graph::BranchTreeNode;
-use crate::core::restack::RestackPreview;
+use crate::core::restack::{RestackBaseTarget, RestackPreview};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CleanOptions {
@@ -67,7 +67,7 @@ pub(crate) type CleanTreeNode = BranchTreeNode;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CleanReason {
     DeletedLocally,
-    IntegratedIntoParent { parent_branch: String },
+    IntegratedIntoParent { parent_base: RestackBaseTarget },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
