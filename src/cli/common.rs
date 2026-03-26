@@ -22,6 +22,8 @@ pub fn confirm_yes_no(prompt: &str) -> io::Result<bool> {
 
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
+    writeln!(stdout)?;
+    stdout.flush()?;
 
     Ok(matches!(input.trim(), "y" | "Y" | "yes" | "YES" | "Yes"))
 }
