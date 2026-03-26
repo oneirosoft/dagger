@@ -34,7 +34,6 @@ pub struct PrOutcome {
     pub branch_name: String,
     pub base_branch_name: String,
     pub pull_request: TrackedPullRequest,
-    pub pull_request_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,7 +93,6 @@ pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
             branch_name,
             base_branch_name,
             pull_request,
-            pull_request_url: None,
         });
     }
 
@@ -150,7 +148,6 @@ pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
                 branch_name,
                 base_branch_name,
                 pull_request,
-                pull_request_url: Some(created_pull_request.url),
             })
         }
         PrTrackingAction::Adopt(existing_pull_request) => {
@@ -172,7 +169,6 @@ pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
                 branch_name,
                 base_branch_name,
                 pull_request,
-                pull_request_url: Some(existing_pull_request.url),
             })
         }
     }

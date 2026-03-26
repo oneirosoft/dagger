@@ -94,9 +94,6 @@ fn execute_current(args: PrArgs) -> io::Result<CommandOutcome> {
                 "Created pull request #{} for '{}' into '{}'.",
                 outcome.pull_request.number, outcome.branch_name, outcome.base_branch_name
             );
-            if let Some(url) = outcome.pull_request_url.as_deref() {
-                println!("Link: {url}");
-            }
         }
         PrOutcomeKind::Adopted => {
             println!(
