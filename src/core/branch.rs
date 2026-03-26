@@ -78,6 +78,7 @@ pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
         fork_point_oid: parent_head_oid.clone(),
         head_oid_at_creation: parent_head_oid,
         created_at_unix_secs: now_unix_timestamp_secs(),
+        pull_request: None,
         archived: false,
     };
 
@@ -181,6 +182,7 @@ mod tests {
                 fork_point_oid: "abc123".into(),
                 head_oid_at_creation: "abc123".into(),
                 created_at_unix_secs: 1,
+                pull_request: None,
                 archived: false,
             }],
         };

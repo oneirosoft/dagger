@@ -163,6 +163,7 @@ mod tests {
                         fork_point_oid: "abc123".into(),
                         head_oid_at_creation: "abc123".into(),
                         created_at_unix_secs: 1,
+                        pull_request: None,
                         archived: false,
                     },
                     BranchNode {
@@ -173,6 +174,7 @@ mod tests {
                         fork_point_oid: "def456".into(),
                         head_oid_at_creation: "def456".into(),
                         created_at_unix_secs: 2,
+                        pull_request: None,
                         archived: false,
                     },
                     BranchNode {
@@ -183,6 +185,7 @@ mod tests {
                         fork_point_oid: "fedcba".into(),
                         head_oid_at_creation: "fedcba".into(),
                         created_at_unix_secs: 3,
+                        pull_request: None,
                         archived: false,
                     },
                 ],
