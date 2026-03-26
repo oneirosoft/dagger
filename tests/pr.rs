@@ -227,6 +227,56 @@ exit 1
 }
 
 #[test]
+fn pr_defaults_body_to_title_when_body_is_omitted() {
+    with_temp_repo("dig-pr-cli", |repo| {
+        initialize_main_repo(repo);
+        dig_ok(repo, &["init"]);
+        dig_ok(repo, &["branch", "feat/auth"]);
+
+        let (_, path, log_path) = install_fake_gh(
+            repo,
+            r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '[]\n'
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  printf 'https://github.com/acme/dig/pull/321\n'
+  exit 0
+fi
+echo "unexpected gh args: $*" >&2
+exit 1
+"#,
+        );
+
+        let output = dig_ok_with_env(
+            repo,
+            &["pr", "--title", "feat-auth", "--draft"],
+            &[
+                ("PATH", path.as_str()),
+                ("DIG_TEST_GH_LOG", log_path.as_str()),
+            ],
+        );
+        let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
+
+        assert!(stdout.contains("Created pull request #321 for 'feat/auth' into 'main'."));
+        assert_eq!(
+            stdout
+                .matches("https://github.com/acme/dig/pull/321")
+                .count(),
+            1
+        );
+
+        let gh_log = fs::read_to_string(log_path).unwrap();
+        assert!(
+            gh_log.contains("pr create --base main --title feat-auth --body feat-auth --draft")
+        );
+    });
+}
+
+#[test]
 fn pr_adopts_matching_open_pull_request_without_creating_another() {
     with_temp_repo("dig-pr-cli", |repo| {
         initialize_main_repo(repo);
@@ -452,7 +502,7 @@ exit 1
             vec![
                 "pr list --head feat/auth --state open --json number,baseRefName,url",
                 "pr list --head feat/auth --state open --json number,baseRefName,url",
-                "pr create --base main --title feat-auth",
+                "pr create --base main --title feat-auth --body feat-auth",
                 "pr view 123 --web",
             ]
         );
@@ -832,5 +882,67 @@ fn pr_reports_missing_gh_cli() {
         assert!(!output.status.success());
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(stderr.contains("gh CLI is not installed or not found on PATH"));
+    });
+}
+
+#[test]
+fn pr_hides_gh_usage_output_when_create_fails() {
+    with_temp_repo("dig-pr-cli", |repo| {
+        initialize_main_repo(repo);
+        dig_ok(repo, &["init"]);
+        dig_ok(repo, &["branch", "feat/auth"]);
+
+        let (_, path, log_path) = install_fake_gh(
+            repo,
+            r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '[]\n'
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  cat >&2 <<'EOF'
+must provide `--title` and `--body` (or `--fill`)
+
+Usage:  gh pr create [flags]
+
+Flags:
+  -b, --body string
+EOF
+  exit 1
+fi
+echo "unexpected gh args: $*" >&2
+exit 1
+"#,
+        );
+
+        let output = support::dig_with_env(
+            repo,
+            &["pr", "--title", "feat-auth", "--draft"],
+            &[
+                ("PATH", path.as_str()),
+                ("DIG_TEST_GH_LOG", log_path.as_str()),
+            ],
+        );
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8(output.stdout).unwrap().trim().is_empty());
+
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(
+            stderr
+                .matches("must provide `--title` and `--body`")
+                .count(),
+            1
+        );
+        assert!(stderr.contains("gh pr create failed: must provide `--title` and `--body`"));
+        assert!(!stderr.contains("Usage:"));
+        assert!(!stderr.contains("Flags:"));
+
+        let gh_log = fs::read_to_string(log_path).unwrap();
+        assert!(
+            gh_log.contains("pr create --base main --title feat-auth --body feat-auth --draft")
+        );
     });
 }

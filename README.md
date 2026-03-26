@@ -137,7 +137,8 @@ By default, dig targets the branch's tracked parent as the PR base. Root branche
 
 If the branch is not pushed to a resolvable remote yet, `dig pr` prompts before running `git push -u <remote> <branch>` and then continues with PR creation if you confirm.
 
-When dig creates a pull request, it prints both the creation summary and the GitHub link.
+When dig creates a pull request, it prints both the creation summary and the GitHub link. If you pass
+`--title` without `--body`, dig reuses the title as the PR body.
 
 `dig tree` annotates tracked branches that have a PR with `(#123)`.
 
