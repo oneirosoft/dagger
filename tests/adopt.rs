@@ -1,20 +1,20 @@
 mod support;
 
 use support::{
-    active_rebase_head_name, commit_file, dig, dig_ok, events_contain_type, find_node, git_ok,
+    active_rebase_head_name, commit_file, dgr, dgr_ok, events_contain_type, find_node, git_ok,
     git_stdout, initialize_main_repo, load_operation_json, load_state_json, overwrite_file,
     strip_ansi, with_temp_repo,
 };
 
 #[test]
 fn adopts_current_branch_onto_trunk_without_rebase() {
-    with_temp_repo("dig-adopt-cli", |repo| {
+    with_temp_repo("dgr-adopt-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
+        dgr_ok(repo, &["init"]);
         git_ok(repo, &["checkout", "-b", "feat/adopted"]);
         commit_file(repo, "adopted.txt", "adopted\n", "feat: adopted");
 
-        let output = dig_ok(repo, &["adopt", "-p", "main"]);
+        let output = dgr_ok(repo, &["adopt", "-p", "main"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("Adopted 'feat/adopted' under 'main'."));
@@ -29,17 +29,17 @@ fn adopts_current_branch_onto_trunk_without_rebase() {
 
 #[test]
 fn adopts_named_branch_with_rebase_and_restores_original_branch() {
-    with_temp_repo("dig-adopt-cli", |repo| {
+    with_temp_repo("dgr-adopt-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
         git_ok(repo, &["checkout", "main"]);
         git_ok(repo, &["checkout", "-b", "feat/auth-ui"]);
         commit_file(repo, "ui.txt", "ui\n", "feat: auth ui");
         git_ok(repo, &["checkout", "feat/auth"]);
 
-        let output = dig_ok(repo, &["adopt", "feat/auth-ui", "-p", "feat/auth"]);
+        let output = dgr_ok(repo, &["adopt", "feat/auth-ui", "-p", "feat/auth"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("Adopted 'feat/auth-ui' under 'feat/auth'."));
@@ -61,24 +61,24 @@ fn adopts_named_branch_with_rebase_and_restores_original_branch() {
 
 #[test]
 fn leaves_rebase_open_when_adopt_rebase_conflicts() {
-    with_temp_repo("dig-adopt-cli", |repo| {
+    with_temp_repo("dgr-adopt-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         overwrite_file(repo, "shared.txt", "parent\n", "feat: parent change");
         git_ok(repo, &["checkout", "main"]);
         git_ok(repo, &["checkout", "-b", "feat/auth-ui"]);
         overwrite_file(repo, "shared.txt", "child\n", "feat: child change");
         git_ok(repo, &["checkout", "feat/auth"]);
 
-        let output = dig(repo, &["adopt", "feat/auth-ui", "-p", "feat/auth"]);
+        let output = dgr(repo, &["adopt", "feat/auth-ui", "-p", "feat/auth"]);
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(!output.status.success());
 
         let state = load_state_json(repo);
         assert!(find_node(&state, "feat/auth-ui").is_none());
         assert!(!events_contain_type(repo, "branch_adopted"));
-        assert!(stderr.contains("dig sync --continue"));
+        assert!(stderr.contains("dgr sync --continue"));
         assert!(repo.join(".git/rebase-merge").exists() || repo.join(".git/rebase-apply").exists());
         assert!(load_operation_json(repo).is_some());
         assert!(

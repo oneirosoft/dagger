@@ -81,7 +81,7 @@ pub(crate) enum CleanBlockReason {
     BranchNotTracked,
     BranchMissingLocally,
     ParentMissingLocally { parent_branch: String },
-    ParentMissingFromDig,
+    ParentMissingFromDagger,
     NotIntegrated { parent_branch: String },
     DescendantsMissingLocally { branch_names: Vec<String> },
 }

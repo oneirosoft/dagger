@@ -2,7 +2,7 @@ use super::apply::build_squash_commit_message;
 use super::plan::plan as build_plan;
 use super::{MergeMode, MergeOptions, delete_merged_branch};
 use crate::core::git;
-use crate::core::store::{ParentRef, dig_paths, load_state};
+use crate::core::store::{ParentRef, dagger_paths, load_state};
 use crate::core::test_support::{
     append_file, commit_file, create_tracked_branch, git_ok, git_output, initialize_main_repo,
     with_temp_repo,
@@ -67,7 +67,7 @@ fn appends_commit_listing_after_user_supplied_squash_message() {
 
 #[test]
 fn merges_child_into_parent_and_restacks_descendants() {
-    with_temp_repo("dig-merge", |repo| {
+    with_temp_repo("dgr-merge", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -107,7 +107,8 @@ fn merges_child_into_parent_and_restacks_descendants() {
         );
         assert_eq!(git::current_branch_name().unwrap(), "feat/auth");
 
-        let state = load_state(&dig_paths(&git::resolve_repo_context().unwrap().git_dir)).unwrap();
+        let state =
+            load_state(&dagger_paths(&git::resolve_repo_context().unwrap().git_dir)).unwrap();
         let restacked_child = state.find_branch_by_name("feat/auth-api-tests").unwrap();
         assert_eq!(
             restacked_child.parent,
@@ -125,7 +126,7 @@ fn merges_child_into_parent_and_restacks_descendants() {
 
 #[test]
 fn squash_merges_into_trunk_and_keeps_branch_when_delete_is_declined() {
-    with_temp_repo("dig-merge", |repo| {
+    with_temp_repo("dgr-merge", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -170,7 +171,8 @@ fn squash_merges_into_trunk_and_keeps_branch_when_delete_is_declined() {
         assert!(log_message.contains("commit "));
         assert!(log_message.contains("feat: auth"));
 
-        let state = load_state(&dig_paths(&git::resolve_repo_context().unwrap().git_dir)).unwrap();
+        let state =
+            load_state(&dagger_paths(&git::resolve_repo_context().unwrap().git_dir)).unwrap();
         let restacked_child = state.find_branch_by_name("feat/auth-api").unwrap();
         assert_eq!(restacked_child.parent, ParentRef::Trunk);
         assert_eq!(restacked_child.base_ref, "main");
@@ -180,7 +182,7 @@ fn squash_merges_into_trunk_and_keeps_branch_when_delete_is_declined() {
 
 #[test]
 fn blocks_merge_when_tracked_descendant_is_missing_locally() {
-    with_temp_repo("dig-merge", |repo| {
+    with_temp_repo("dgr-merge", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -203,7 +205,7 @@ fn blocks_merge_when_tracked_descendant_is_missing_locally() {
 
 #[test]
 fn leaves_state_unchanged_when_merge_conflicts() {
-    with_temp_repo("dig-merge", |repo| {
+    with_temp_repo("dgr-merge", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "shared.txt", "source branch\n", "feat: auth");
@@ -233,7 +235,8 @@ fn leaves_state_unchanged_when_merge_conflicts() {
 
         assert!(!outcome.status.success());
 
-        let state = load_state(&dig_paths(&git::resolve_repo_context().unwrap().git_dir)).unwrap();
+        let state =
+            load_state(&dagger_paths(&git::resolve_repo_context().unwrap().git_dir)).unwrap();
         let node = state.find_branch_by_name("feat/auth").unwrap();
         assert_eq!(node.parent, ParentRef::Trunk);
         assert!(git::branch_exists("feat/auth").unwrap());

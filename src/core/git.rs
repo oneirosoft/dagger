@@ -82,7 +82,7 @@ pub fn resolve_repo_context() -> io::Result<RepoContext> {
 pub fn current_branch_name() -> io::Result<String> {
     let Some(branch_name) = current_branch_name_if_any()? else {
         return Err(io::Error::other(
-            "dig branch requires a named branch; detached HEAD is not supported",
+            "dgr branch requires a named branch; detached HEAD is not supported",
         ));
     };
 
@@ -276,7 +276,7 @@ pub fn ensure_no_in_progress_operations(repo: &RepoContext, command_name: &str) 
     for (relative_path, operation_name) in in_progress_paths {
         if repo.git_dir.join(relative_path).exists() {
             return Err(io::Error::other(format!(
-                "dig {command_name} cannot run while a git {operation_name} is in progress"
+                "dgr {command_name} cannot run while a git {operation_name} is in progress"
             )));
         }
     }
@@ -285,7 +285,7 @@ pub fn ensure_no_in_progress_operations(repo: &RepoContext, command_name: &str) 
     for relative_path in rebase_dirs {
         if repo.git_dir.join(relative_path).exists() {
             return Err(io::Error::other(format!(
-                "dig {command_name} cannot run while a git rebase is in progress"
+                "dgr {command_name} cannot run while a git rebase is in progress"
             )));
         }
     }
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn reports_in_progress_rebase_state() {
-        let repo_git_dir = env::temp_dir().join(format!("dig-git-{}", Uuid::new_v4()));
+        let repo_git_dir = env::temp_dir().join(format!("dgr-git-{}", Uuid::new_v4()));
         fs::create_dir_all(repo_git_dir.join("rebase-merge")).unwrap();
 
         let error = super::ensure_no_in_progress_operations(

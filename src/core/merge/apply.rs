@@ -22,7 +22,7 @@ pub(crate) fn apply_with_reporter<F>(plan: &MergePlan, reporter: &mut F) -> io::
 where
     F: FnMut(MergeEvent) -> io::Result<()>,
 {
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     workflow::ensure_ready_for_operation(&session.repo, "merge")?;
     workflow::ensure_no_pending_operation(&session.paths, "merge")?;
     let current_branch = git::current_branch_name()?;
@@ -172,7 +172,7 @@ pub(crate) fn delete_merged_branch_by_id(
     source_node_id: uuid::Uuid,
     target_branch_name: &str,
 ) -> io::Result<DeleteMergedBranchOutcome> {
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let node = session
         .state
         .find_branch_by_id(source_node_id)
@@ -206,7 +206,7 @@ pub(crate) fn resume_after_sync(
     pending_operation: PendingOperationState,
     payload: PendingMergeOperation,
 ) -> io::Result<MergeResumeOutcome> {
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let restack_outcome = workflow::continue_resumable_restack_operation(
         &mut session,
         pending_operation,
@@ -277,7 +277,7 @@ fn run_squash_merge(
         &plan.messages,
         source_commits,
     );
-    let message_path = git_dir.join("DIG_MERGE_MSG");
+    let message_path = git_dir.join("DAGGER_MERGE_MSG");
     fs::write(&message_path, message)?;
     let commit_output = git::commit_with_message_file(&message_path);
     let remove_result = fs::remove_file(&message_path);

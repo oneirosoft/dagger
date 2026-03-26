@@ -1,10 +1,10 @@
 use std::fs;
 use std::io;
 
-use super::fs::{DigPaths, ensure_store_dir, write_atomic};
+use super::fs::{DaggerPaths, ensure_store_dir, write_atomic};
 use super::types::PendingOperationState;
 
-pub fn load_operation(paths: &DigPaths) -> io::Result<Option<PendingOperationState>> {
+pub fn load_operation(paths: &DaggerPaths) -> io::Result<Option<PendingOperationState>> {
     if !paths.operation_file.exists() {
         return Ok(None);
     }
@@ -16,7 +16,7 @@ pub fn load_operation(paths: &DigPaths) -> io::Result<Option<PendingOperationSta
     Ok(Some(operation))
 }
 
-pub fn save_operation(paths: &DigPaths, operation: &PendingOperationState) -> io::Result<()> {
+pub fn save_operation(paths: &DaggerPaths, operation: &PendingOperationState) -> io::Result<()> {
     ensure_store_dir(paths)?;
 
     let bytes = serde_json::to_vec_pretty(operation)
@@ -25,7 +25,7 @@ pub fn save_operation(paths: &DigPaths, operation: &PendingOperationState) -> io
     write_atomic(&paths.operation_file, &bytes)
 }
 
-pub fn clear_operation(paths: &DigPaths) -> io::Result<()> {
+pub fn clear_operation(paths: &DaggerPaths) -> io::Result<()> {
     if !paths.operation_file.exists() {
         return Ok(());
     }
@@ -41,7 +41,7 @@ mod tests {
 
     use super::{clear_operation, load_operation, save_operation};
     use crate::core::restack::{RestackAction, RestackBaseTarget};
-    use crate::core::store::dig_paths;
+    use crate::core::store::dagger_paths;
     use crate::core::store::{
         ParentRef, PendingCommitOperation, PendingOperationKind, PendingOperationState,
         PendingReparentOperation, PendingSyncOperation, PendingSyncPhase,
@@ -49,10 +49,10 @@ mod tests {
 
     #[test]
     fn saves_and_loads_pending_operation() {
-        let git_dir = std::env::temp_dir().join(format!("dig-operation-{}", Uuid::new_v4()));
+        let git_dir = std::env::temp_dir().join(format!("dgr-operation-{}", Uuid::new_v4()));
         fs::create_dir_all(&git_dir).unwrap();
 
-        let paths = dig_paths(&git_dir);
+        let paths = dagger_paths(&git_dir);
         let operation = PendingOperationState::start(
             PendingOperationKind::Commit(PendingCommitOperation {
                 current_branch: "feat/auth".into(),
@@ -79,10 +79,10 @@ mod tests {
 
     #[test]
     fn clears_pending_operation_file() {
-        let git_dir = std::env::temp_dir().join(format!("dig-operation-{}", Uuid::new_v4()));
+        let git_dir = std::env::temp_dir().join(format!("dgr-operation-{}", Uuid::new_v4()));
         fs::create_dir_all(&git_dir).unwrap();
 
-        let paths = dig_paths(&git_dir);
+        let paths = dagger_paths(&git_dir);
         let operation = PendingOperationState::start(
             PendingOperationKind::Commit(PendingCommitOperation {
                 current_branch: "feat/auth".into(),
@@ -110,10 +110,10 @@ mod tests {
 
     #[test]
     fn saves_and_loads_pending_sync_operation() {
-        let git_dir = std::env::temp_dir().join(format!("dig-operation-{}", Uuid::new_v4()));
+        let git_dir = std::env::temp_dir().join(format!("dgr-operation-{}", Uuid::new_v4()));
         fs::create_dir_all(&git_dir).unwrap();
 
-        let paths = dig_paths(&git_dir);
+        let paths = dagger_paths(&git_dir);
         let operation = PendingOperationState::start(
             PendingOperationKind::Sync(PendingSyncOperation {
                 original_branch: "feat/auth".into(),
@@ -143,10 +143,10 @@ mod tests {
 
     #[test]
     fn saves_and_loads_pending_reparent_operation() {
-        let git_dir = std::env::temp_dir().join(format!("dig-operation-{}", Uuid::new_v4()));
+        let git_dir = std::env::temp_dir().join(format!("dgr-operation-{}", Uuid::new_v4()));
         fs::create_dir_all(&git_dir).unwrap();
 
-        let paths = dig_paths(&git_dir);
+        let paths = dagger_paths(&git_dir);
         let operation = PendingOperationState::start(
             PendingOperationKind::Reparent(PendingReparentOperation {
                 original_branch: "feat/current".into(),

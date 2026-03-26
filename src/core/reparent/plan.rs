@@ -11,7 +11,7 @@ use super::types::{ReparentOptions, ReparentPlan};
 
 pub(crate) fn plan(options: &ReparentOptions) -> io::Result<ReparentPlan> {
     workflow::ensure_no_pending_operation_for_command("reparent")?;
-    let session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let original_branch = git::current_branch_name()?;
     let branch_name = resolve_branch_name(&original_branch, options.branch_name.as_deref())?;
     let parent_branch_name = options.parent_branch_name.trim();
@@ -54,7 +54,7 @@ pub(crate) fn plan(options: &ReparentOptions) -> io::Result<ReparentPlan> {
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("branch '{}' is not tracked by dig", branch_name),
+                format!("branch '{}' is not tracked by dagger", branch_name),
             )
         })?;
 
@@ -70,7 +70,7 @@ pub(crate) fn plan(options: &ReparentOptions) -> io::Result<ReparentPlan> {
         .parent_branch_name(&node, &session.config.trunk_branch)
         .ok_or_else(|| {
             io::Error::other(format!(
-                "tracked parent for '{}' is missing from dig",
+                "tracked parent for '{}' is missing from dagger",
                 branch_name
             ))
         })?;

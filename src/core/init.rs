@@ -46,7 +46,7 @@ pub fn run(_: &InitOptions) -> io::Result<InitOutcome> {
 mod tests {
     use crate::core::graph::{BranchGraph, BranchLineageNode};
     use crate::core::store::StoreInitialization;
-    use crate::core::store::types::DigState;
+    use crate::core::store::types::DaggerState;
     use std::process::{Command, Stdio};
 
     #[test]
@@ -59,7 +59,7 @@ mod tests {
         let outcome = super::InitOutcome {
             status,
             created_git_repo: true,
-            lineage: BranchGraph::new(&DigState::default()).lineage("main", "main"),
+            lineage: BranchGraph::new(&DaggerState::default()).lineage("main", "main"),
             store_initialization: StoreInitialization::default(),
         };
 

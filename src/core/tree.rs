@@ -5,7 +5,7 @@ use std::process::ExitStatus;
 use uuid::Uuid;
 
 use crate::core::git;
-use crate::core::store::types::DigState;
+use crate::core::store::types::DaggerState;
 use crate::core::store::{BranchNode, ParentRef, open_initialized};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -42,7 +42,7 @@ pub struct TreeOutcome {
 
 pub fn run(options: &TreeOptions) -> io::Result<TreeOutcome> {
     let status = git::probe_repo_status()?;
-    let session = open_initialized("dig is not initialized")?;
+    let session = open_initialized("dagger is not initialized")?;
     let current_branch = git::current_branch_name_if_any()?;
     let full_view = build_tree_view(
         &session.state,
@@ -55,13 +55,17 @@ pub fn run(options: &TreeOptions) -> io::Result<TreeOutcome> {
 }
 
 pub(crate) fn focused_context_view(branch_name: &str) -> io::Result<TreeView> {
-    let session = open_initialized("dig is not initialized")?;
+    let session = open_initialized("dagger is not initialized")?;
     let full_view = build_tree_view(&session.state, &session.config.trunk_branch, None);
 
     focus_tree_view(full_view, branch_name)
 }
 
-fn build_tree_view(state: &DigState, trunk_branch: &str, current_branch: Option<&str>) -> TreeView {
+fn build_tree_view(
+    state: &DaggerState,
+    trunk_branch: &str,
+    current_branch: Option<&str>,
+) -> TreeView {
     let active_nodes = state
         .nodes
         .iter()
@@ -135,7 +139,7 @@ fn filter_tree_view(view: TreeView, requested_branch: Option<&str>) -> io::Resul
             io::Error::new(
                 io::ErrorKind::NotFound,
                 format!(
-                    "tracked branch '{}' was not found in dig tree",
+                    "tracked branch '{}' was not found in dagger tree",
                     requested_branch
                 ),
             )
@@ -176,7 +180,7 @@ fn focus_tree_view(view: TreeView, requested_branch: &str) -> io::Result<TreeVie
             io::Error::new(
                 io::ErrorKind::NotFound,
                 format!(
-                    "tracked branch '{}' was not found in dig tree",
+                    "tracked branch '{}' was not found in dagger tree",
                     requested_branch
                 ),
             )
@@ -275,8 +279,8 @@ mod tests {
     use super::{
         TreeLabel, TreeNode, TreeView, build_tree_view, filter_tree_view, focus_tree_view,
     };
-    use crate::core::store::types::DIG_STATE_VERSION;
-    use crate::core::store::types::DigState;
+    use crate::core::store::types::DAGGER_STATE_VERSION;
+    use crate::core::store::types::DaggerState;
     use crate::core::store::{BranchDivergenceState, BranchNode, ParentRef};
     use uuid::Uuid;
 
@@ -285,8 +289,8 @@ mod tests {
         let auth_id = Uuid::new_v4();
         let auth_api_id = Uuid::new_v4();
         let billing_id = Uuid::new_v4();
-        let state = DigState {
-            version: DIG_STATE_VERSION,
+        let state = DaggerState {
+            version: DAGGER_STATE_VERSION,
             nodes: vec![
                 BranchNode {
                     id: auth_id,

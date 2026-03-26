@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
-pub struct DigPaths {
+pub struct DaggerPaths {
     pub root: PathBuf,
     pub config_file: PathBuf,
     pub operation_file: PathBuf,
@@ -13,10 +13,10 @@ pub struct DigPaths {
     pub events_file: PathBuf,
 }
 
-pub fn dig_paths(git_dir: &Path) -> DigPaths {
-    let root = git_dir.join("dig");
+pub fn dagger_paths(git_dir: &Path) -> DaggerPaths {
+    let root = git_dir.join(".dagger");
 
-    DigPaths {
+    DaggerPaths {
         config_file: root.join("config.json"),
         operation_file: root.join("operation.json"),
         state_file: root.join("state.json"),
@@ -25,7 +25,7 @@ pub fn dig_paths(git_dir: &Path) -> DigPaths {
     }
 }
 
-pub fn ensure_store_dir(paths: &DigPaths) -> io::Result<()> {
+pub fn ensure_store_dir(paths: &DaggerPaths) -> io::Result<()> {
     fs::create_dir_all(&paths.root)
 }
 

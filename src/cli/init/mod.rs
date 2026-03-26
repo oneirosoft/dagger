@@ -19,9 +19,9 @@ pub fn execute(args: InitArgs) -> io::Result<CommandOutcome> {
     }
 
     if outcome.store_initialization.created_anything() {
-        println!("Initialized dig.");
+        println!("Initialized dagger.");
     } else {
-        println!("Dig is already initialized.");
+        println!("Dagger is already initialized.");
     }
 
     println!();

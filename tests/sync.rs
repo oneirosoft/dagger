@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use support::{
-    active_rebase_head_name, commit_file, dig, dig_ok, dig_with_env, dig_with_input,
-    dig_with_input_and_env, find_archived_node, find_node, git_ok, git_stdout,
+    active_rebase_head_name, commit_file, dgr, dgr_ok, dgr_with_env, dgr_with_input,
+    dgr_with_input_and_env, find_archived_node, find_node, git_ok, git_stdout,
     initialize_main_repo, install_fake_executable, load_events_json, load_operation_json,
     load_state_json, overwrite_file, path_with_prepend, strip_ansi, with_temp_repo, write_file,
 };
@@ -30,7 +30,7 @@ fn clone_origin(repo: &Path, clone_name: &str) -> PathBuf {
     let clone_dir = repo.join(".git").join(clone_name);
     let clone_path = clone_dir.to_string_lossy().into_owned();
     git_ok(repo, &["clone", ".git/origin.git", &clone_path]);
-    git_ok(&clone_dir, &["config", "user.name", "Dig Remote"]);
+    git_ok(&clone_dir, &["config", "user.name", "Dagger Remote"]);
     git_ok(&clone_dir, &["config", "user.email", "remote@example.com"]);
     git_ok(&clone_dir, &["config", "commit.gpgsign", "false"]);
     clone_dir
@@ -69,7 +69,7 @@ fn count_remote_ref_updates(log_path: &str, ref_name: &str) -> usize {
 }
 
 fn track_pull_request_number(repo: &Path, branch_name: &str, number: u64) {
-    let state_path = repo.join(".git/dig/state.json");
+    let state_path = repo.join(".git/.dagger/state.json");
     let mut state = load_state_json(repo);
     let nodes = state["nodes"].as_array_mut().unwrap();
     let node = nodes
@@ -84,7 +84,7 @@ fn track_pull_request_number(repo: &Path, branch_name: &str, number: u64) {
 }
 
 fn set_branch_archived(repo: &Path, branch_name: &str, archived: bool) {
-    let state_path = repo.join(".git/dig/state.json");
+    let state_path = repo.join(".git/.dagger/state.json");
     let mut state = load_state_json(repo);
     let node = state["nodes"]
         .as_array_mut()
@@ -99,11 +99,11 @@ fn set_branch_archived(repo: &Path, branch_name: &str, archived: bool) {
 fn setup_remotely_merged_root_branch_with_local_trunk_advance(repo: &Path) {
     initialize_main_repo(repo);
     initialize_origin_remote(repo);
-    dig_ok(repo, &["init"]);
-    dig_ok(repo, &["branch", "feat/auth"]);
+    dgr_ok(repo, &["init"]);
+    dgr_ok(repo, &["branch", "feat/auth"]);
     overwrite_file(repo, "shared.txt", "feature\n", "feat: auth");
     git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
-    dig_ok(repo, &["branch", "feat/auth-ui"]);
+    dgr_ok(repo, &["branch", "feat/auth-ui"]);
     commit_file(repo, "ui.txt", "ui\n", "feat: ui");
     git_ok(repo, &["checkout", "main"]);
     overwrite_file(
@@ -130,8 +130,8 @@ fn setup_remotely_merged_root_branch_with_children(
 ) {
     initialize_main_repo(repo);
     initialize_origin_remote(repo);
-    dig_ok(repo, &["init"]);
-    dig_ok(repo, &["branch", "feat/auth"]);
+    dgr_ok(repo, &["init"]);
+    dgr_ok(repo, &["branch", "feat/auth"]);
     overwrite_file(repo, "shared.txt", "feature\n", "feat: auth");
     git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
 
@@ -140,7 +140,7 @@ fn setup_remotely_merged_root_branch_with_children(
             git_ok(repo, &["checkout", "feat/auth"]);
         }
 
-        dig_ok(repo, &["branch", branch_name]);
+        dgr_ok(repo, &["branch", branch_name]);
         commit_file(repo, file_name, contents, message);
         git_ok(repo, &["push", "-u", "origin", branch_name]);
     }
@@ -166,11 +166,11 @@ fn setup_remotely_merged_root_branch_with_children(
 
 #[test]
 fn sync_reports_noop_when_local_stacks_are_already_in_sync() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
+        dgr_ok(repo, &["init"]);
 
-        let output = dig_ok(repo, &["sync"]);
+        let output = dgr_ok(repo, &["sync"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert_eq!(stdout.trim_end(), "Local stacks are already in sync.");
@@ -179,12 +179,12 @@ fn sync_reports_noop_when_local_stacks_are_already_in_sync() {
 
 #[test]
 fn sync_does_not_prompt_to_clean_fresh_branch_without_commits() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
-        let output = dig_ok(repo, &["sync"]);
+        let output = dgr_ok(repo, &["sync"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert_eq!(stdout.trim_end(), "Local stacks are already in sync.");
@@ -195,14 +195,14 @@ fn sync_does_not_prompt_to_clean_fresh_branch_without_commits() {
 
 #[test]
 fn sync_does_not_prompt_to_clean_fresh_child_branch_without_commits() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
 
-        let output = dig_ok(repo, &["sync"]);
+        let output = dgr_ok(repo, &["sync"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert_eq!(stdout.trim_end(), "Local stacks are already in sync.");
@@ -213,15 +213,15 @@ fn sync_does_not_prompt_to_clean_fresh_child_branch_without_commits() {
 
 #[test]
 fn sync_restacks_fresh_branch_after_trunk_advances_without_prompting_cleanup() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         git_ok(repo, &["checkout", "main"]);
         commit_file(repo, "README.md", "root\nmain\n", "feat: trunk follow-up");
         git_ok(repo, &["checkout", "feat/auth"]);
 
-        let output = dig_ok(repo, &["sync"]);
+        let output = dgr_ok(repo, &["sync"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
         let state = load_state_json(repo);
         let auth = find_node(&state, "feat/auth").unwrap();
@@ -247,15 +247,15 @@ fn sync_restacks_fresh_branch_after_trunk_advances_without_prompting_cleanup() {
 
 #[test]
 fn sync_cleans_fast_forward_merged_branch_after_manual_git_commit() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
         git_ok(repo, &["checkout", "main"]);
         git_ok(repo, &["merge", "--ff-only", "feat/auth"]);
 
-        let output = dig_with_input(repo, &["sync"], "y\n");
+        let output = dgr_with_input(repo, &["sync"], "y\n");
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("Merged branches ready to clean:"));
@@ -269,10 +269,10 @@ fn sync_cleans_fast_forward_merged_branch_after_manual_git_commit() {
 
 #[test]
 fn sync_cleans_branch_merged_by_tracked_pull_request_number_without_rebasing() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: add GitHub PR workflows");
         commit_file(
             repo,
@@ -296,7 +296,7 @@ fn sync_cleans_branch_merged_by_tracked_pull_request_number_without_rebasing() {
             ],
         );
 
-        let output = dig_with_input(repo, &["sync"], "y\n");
+        let output = dgr_with_input(repo, &["sync"], "y\n");
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
         let stderr = String::from_utf8(output.stderr).unwrap();
 
@@ -309,7 +309,7 @@ fn sync_cleans_branch_merged_by_tracked_pull_request_number_without_rebasing() {
         assert!(stdout.contains("Delete 1 merged branch? [y/N]"));
         assert!(stdout.contains("Deleted:"));
         assert!(stdout.contains("- feat/auth"));
-        assert!(!stderr.contains("dig sync --continue"));
+        assert!(!stderr.contains("dgr sync --continue"));
         assert!(!git_stdout(repo, &["branch", "--list", "feat/auth"]).contains("feat/auth"));
         assert!(load_operation_json(repo).is_none());
         let state = load_state_json(repo);
@@ -320,18 +320,18 @@ fn sync_cleans_branch_merged_by_tracked_pull_request_number_without_rebasing() {
 
 #[test]
 fn sync_restacks_root_stack_after_trunk_advances() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         commit_file(repo, "ui.txt", "ui\n", "feat: ui");
         git_ok(repo, &["checkout", "main"]);
         commit_file(repo, "README.md", "root\nmain\n", "feat: trunk follow-up");
         git_ok(repo, &["checkout", "feat/auth-ui"]);
 
-        let output = dig_ok(repo, &["sync"]);
+        let output = dgr_ok(repo, &["sync"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("Restacked:"));
@@ -354,18 +354,18 @@ fn sync_restacks_root_stack_after_trunk_advances() {
 
 #[test]
 fn sync_restacks_mid_stack_after_tracked_parent_advances() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         commit_file(repo, "ui.txt", "ui\n", "feat: ui");
         git_ok(repo, &["checkout", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\nmore\n", "feat: parent follow-up");
         git_ok(repo, &["checkout", "main"]);
 
-        let output = dig_ok(repo, &["sync"]);
+        let output = dgr_ok(repo, &["sync"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("Restacked:"));
@@ -381,20 +381,20 @@ fn sync_restacks_mid_stack_after_tracked_parent_advances() {
 
 #[test]
 fn sync_archives_deleted_leaf_branch_and_reports_it() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         commit_file(repo, "ui.txt", "ui\n", "feat: ui");
         git_ok(repo, &["checkout", "feat/auth"]);
         git_ok(repo, &["branch", "-D", "feat/auth-ui"]);
 
-        let output = dig_ok(repo, &["sync"]);
+        let output = dgr_ok(repo, &["sync"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
-        assert!(stdout.contains("Deleted locally and no longer tracked by dig:"));
+        assert!(stdout.contains("Deleted locally and no longer tracked by dagger:"));
         assert!(stdout.contains("- feat/auth-ui"));
 
         let state = load_state_json(repo);
@@ -412,22 +412,22 @@ fn sync_archives_deleted_leaf_branch_and_reports_it() {
 
 #[test]
 fn sync_promotes_descendants_when_deleted_middle_branch_is_tracked() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-api"]);
+        dgr_ok(repo, &["branch", "feat/auth-api"]);
         commit_file(repo, "api.txt", "api\n", "feat: api");
-        dig_ok(repo, &["branch", "feat/auth-api-tests"]);
+        dgr_ok(repo, &["branch", "feat/auth-api-tests"]);
         commit_file(repo, "tests.txt", "tests\n", "feat: tests");
         git_ok(repo, &["checkout", "feat/auth"]);
         git_ok(repo, &["branch", "-D", "feat/auth-api"]);
 
-        let output = dig_ok(repo, &["sync"]);
+        let output = dgr_ok(repo, &["sync"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
-        assert!(stdout.contains("Deleted locally and no longer tracked by dig:"));
+        assert!(stdout.contains("Deleted locally and no longer tracked by dagger:"));
         assert!(stdout.contains("- feat/auth-api"));
         assert!(stdout.contains("Restacked:"));
         assert!(stdout.contains("- feat/auth-api-tests onto feat/auth"));
@@ -448,23 +448,23 @@ fn sync_promotes_descendants_when_deleted_middle_branch_is_tracked() {
 
 #[test]
 fn sync_reconciles_multi_level_missing_ancestors_and_promotes_remaining_stack() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-api"]);
+        dgr_ok(repo, &["branch", "feat/auth-api"]);
         commit_file(repo, "api.txt", "api\n", "feat: api");
-        dig_ok(repo, &["branch", "feat/auth-api-tests"]);
+        dgr_ok(repo, &["branch", "feat/auth-api-tests"]);
         commit_file(repo, "tests.txt", "tests\n", "feat: tests");
         git_ok(repo, &["checkout", "main"]);
         git_ok(repo, &["branch", "-D", "feat/auth-api"]);
         git_ok(repo, &["branch", "-D", "feat/auth"]);
 
-        let output = dig_ok(repo, &["sync"]);
+        let output = dgr_ok(repo, &["sync"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
-        assert!(stdout.contains("Deleted locally and no longer tracked by dig:"));
+        assert!(stdout.contains("Deleted locally and no longer tracked by dagger:"));
         assert!(stdout.contains("- feat/auth-api"));
         assert!(stdout.contains("- feat/auth"));
         assert!(stdout.contains("Restacked:"));
@@ -485,18 +485,18 @@ fn sync_reconciles_multi_level_missing_ancestors_and_promotes_remaining_stack() 
 
 #[test]
 fn sync_hands_off_to_cleanup_and_reuses_delete_prompt() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-api"]);
+        dgr_ok(repo, &["branch", "feat/auth-api"]);
         commit_file(repo, "api.txt", "api\n", "feat: api");
         git_ok(repo, &["checkout", "main"]);
         git_ok(repo, &["merge", "--squash", "feat/auth"]);
         git_ok(repo, &["commit", "--quiet", "-m", "feat: merge auth"]);
 
-        let output = dig_with_input(repo, &["sync"], "y\n");
+        let output = dgr_with_input(repo, &["sync"], "y\n");
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(output.status.success());
@@ -517,16 +517,16 @@ fn sync_hands_off_to_cleanup_and_reuses_delete_prompt() {
 
 #[test]
 fn sync_can_skip_cleanup_after_prompt_without_aborting() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
         git_ok(repo, &["checkout", "main"]);
         git_ok(repo, &["merge", "--squash", "feat/auth"]);
         git_ok(repo, &["commit", "--quiet", "-m", "feat: merge auth"]);
 
-        let output = dig_with_input(repo, &["sync"], "n\n");
+        let output = dgr_with_input(repo, &["sync"], "n\n");
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(output.status.success());
@@ -540,25 +540,25 @@ fn sync_can_skip_cleanup_after_prompt_without_aborting() {
 
 #[test]
 fn sync_continues_paused_commit_restack() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "shared.txt", "base\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         overwrite_file(repo, "shared.txt", "child\n", "feat: child");
         git_ok(repo, &["checkout", "feat/auth"]);
         write_file(repo, "shared.txt", "parent\n");
         git_ok(repo, &["add", "shared.txt"]);
 
-        let paused = dig(repo, &["commit", "-m", "feat: parent follow-up"]);
+        let paused = dgr(repo, &["commit", "-m", "feat: parent follow-up"]);
         assert!(!paused.status.success());
         assert!(load_operation_json(repo).is_some());
 
         std::fs::write(repo.join("shared.txt"), "resolved\n").unwrap();
         git_ok(repo, &["add", "shared.txt"]);
 
-        let resumed = dig_ok(repo, &["sync", "--continue"]);
+        let resumed = dgr_ok(repo, &["sync", "--continue"]);
         let stdout = strip_ansi(&String::from_utf8(resumed.stdout).unwrap());
 
         assert!(stdout.contains("feat: parent follow-up"));
@@ -575,22 +575,22 @@ fn sync_continues_paused_commit_restack() {
 
 #[test]
 fn sync_continues_paused_full_sync_rebase() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         overwrite_file(repo, "shared.txt", "parent\n", "feat: parent");
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         commit_file(repo, "ui.txt", "ui\n", "feat: ui");
         git_ok(repo, &["checkout", "main"]);
         overwrite_file(repo, "shared.txt", "main\n", "feat: trunk");
         git_ok(repo, &["checkout", "feat/auth"]);
 
-        let paused = dig(repo, &["sync"]);
+        let paused = dgr(repo, &["sync"]);
         let stderr = String::from_utf8(paused.stderr).unwrap();
 
         assert!(!paused.status.success());
-        assert!(stderr.contains("dig sync --continue"));
+        assert!(stderr.contains("dgr sync --continue"));
         assert_eq!(
             load_operation_json(repo).unwrap()["origin"]["type"].as_str(),
             Some("sync")
@@ -603,7 +603,7 @@ fn sync_continues_paused_full_sync_rebase() {
         std::fs::write(repo.join("shared.txt"), "resolved\n").unwrap();
         git_ok(repo, &["add", "shared.txt"]);
 
-        let resumed = dig_ok(repo, &["sync", "--continue"]);
+        let resumed = dgr_ok(repo, &["sync", "--continue"]);
         let stdout = strip_ansi(&String::from_utf8(resumed.stdout).unwrap());
 
         assert!(stdout.contains("Restacked:"));
@@ -624,24 +624,24 @@ fn sync_continues_paused_full_sync_rebase() {
 
 #[test]
 fn sync_continues_paused_adopt_rebase() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         overwrite_file(repo, "shared.txt", "parent\n", "feat: parent");
         git_ok(repo, &["checkout", "main"]);
         git_ok(repo, &["checkout", "-b", "feat/auth-ui"]);
         overwrite_file(repo, "shared.txt", "child\n", "feat: child");
         git_ok(repo, &["checkout", "feat/auth"]);
 
-        let paused = dig(repo, &["adopt", "feat/auth-ui", "-p", "feat/auth"]);
+        let paused = dgr(repo, &["adopt", "feat/auth-ui", "-p", "feat/auth"]);
         assert!(!paused.status.success());
         assert!(load_operation_json(repo).is_some());
 
         std::fs::write(repo.join("shared.txt"), "resolved\n").unwrap();
         git_ok(repo, &["add", "shared.txt"]);
 
-        let resumed = dig_ok(repo, &["sync", "--continue"]);
+        let resumed = dgr_ok(repo, &["sync", "--continue"]);
         let stdout = strip_ansi(&String::from_utf8(resumed.stdout).unwrap());
 
         assert!(stdout.contains("Adopted 'feat/auth-ui' under 'feat/auth'."));
@@ -661,23 +661,23 @@ fn sync_continues_paused_adopt_rebase() {
 
 #[test]
 fn sync_continues_paused_merge_and_preserves_delete_prompt() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         overwrite_file(repo, "shared.txt", "child\n", "feat: child");
         git_ok(repo, &["checkout", "feat/auth"]);
         overwrite_file(repo, "shared.txt", "parent\n", "feat: parent");
 
-        let paused = dig(repo, &["merge", "feat/auth"]);
+        let paused = dgr(repo, &["merge", "feat/auth"]);
         assert!(!paused.status.success());
         assert!(load_operation_json(repo).is_some());
 
         std::fs::write(repo.join("shared.txt"), "resolved\n").unwrap();
         git_ok(repo, &["add", "shared.txt"]);
 
-        let resumed = dig_with_input(repo, &["sync", "--continue"], "n\n");
+        let resumed = dgr_with_input(repo, &["sync", "--continue"], "n\n");
         let stdout = strip_ansi(&String::from_utf8(resumed.stdout).unwrap());
 
         assert!(resumed.status.success());
@@ -691,11 +691,11 @@ fn sync_continues_paused_merge_and_preserves_delete_prompt() {
 
 #[test]
 fn sync_continues_paused_clean_operation() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
-        dig_ok(repo, &["branch", "feat/auth-api"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["branch", "feat/auth-api"]);
         overwrite_file(repo, "shared.txt", "child\n", "feat: child");
         git_ok(repo, &["checkout", "feat/auth"]);
         overwrite_file(repo, "shared.txt", "parent\n", "feat: parent");
@@ -704,14 +704,14 @@ fn sync_continues_paused_clean_operation() {
         git_ok(repo, &["commit", "--quiet", "-m", "feat: merge auth"]);
         git_ok(repo, &["checkout", "feat/auth"]);
 
-        let paused = dig_with_input(repo, &["clean", "--branch", "feat/auth"], "y\n");
+        let paused = dgr_with_input(repo, &["clean", "--branch", "feat/auth"], "y\n");
         assert!(!paused.status.success());
         assert!(load_operation_json(repo).is_some());
 
         std::fs::write(repo.join("shared.txt"), "resolved\n").unwrap();
         git_ok(repo, &["add", "shared.txt"]);
 
-        let resumed = dig_ok(repo, &["sync", "--continue"]);
+        let resumed = dgr_ok(repo, &["sync", "--continue"]);
         let stdout = strip_ansi(&String::from_utf8(resumed.stdout).unwrap());
 
         assert!(stdout.contains("Deleted:"));
@@ -729,45 +729,45 @@ fn sync_continues_paused_clean_operation() {
 
 #[test]
 fn sync_clears_stale_operation_after_rebase_abort() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "shared.txt", "base\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         overwrite_file(repo, "shared.txt", "child\n", "feat: child");
         git_ok(repo, &["checkout", "feat/auth"]);
         write_file(repo, "shared.txt", "parent\n");
         git_ok(repo, &["add", "shared.txt"]);
 
-        let paused = dig(repo, &["commit", "-m", "feat: parent follow-up"]);
+        let paused = dgr(repo, &["commit", "-m", "feat: parent follow-up"]);
         assert!(!paused.status.success());
         assert!(load_operation_json(repo).is_some());
 
         git_ok(repo, &["rebase", "--abort"]);
 
-        let resumed = dig(repo, &["sync", "--continue"]);
+        let resumed = dgr(repo, &["sync", "--continue"]);
         let stderr = String::from_utf8(resumed.stderr).unwrap();
 
         assert!(!resumed.status.success());
-        assert!(stderr.contains("paused dig commit operation is stale"));
+        assert!(stderr.contains("paused dgr commit operation is stale"));
         assert!(load_operation_json(repo).is_none());
     });
 }
 
 #[test]
 fn sync_aborts_before_local_restack_when_fetch_fails() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
         git_ok(repo, &["checkout", "main"]);
         commit_file(repo, "README.md", "root\nmain\n", "feat: trunk follow-up");
         git_ok(repo, &["checkout", "feat/auth"]);
         git_ok(repo, &["remote", "add", "origin", "/does/not/exist"]);
 
-        let output = dig(repo, &["sync"]);
+        let output = dgr(repo, &["sync"]);
         let stderr = String::from_utf8(output.stderr).unwrap();
 
         assert!(!output.status.success());
@@ -783,10 +783,10 @@ fn sync_aborts_before_local_restack_when_fetch_fails() {
 
 #[test]
 fn sync_cleans_root_branch_merged_remotely_and_restacks_child_onto_fetched_remote_parent() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         setup_remotely_merged_root_branch_with_local_trunk_advance(repo);
 
-        let output = dig_with_input(repo, &["sync"], "y\nn\n");
+        let output = dgr_with_input(repo, &["sync"], "y\nn\n");
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(output.status.success());
@@ -823,10 +823,10 @@ fn sync_cleans_root_branch_merged_remotely_and_restacks_child_onto_fetched_remot
 
 #[test]
 fn sync_skips_recreating_remotely_merged_root_branch_when_cleanup_is_declined() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         setup_remotely_merged_root_branch_with_local_trunk_advance(repo);
 
-        let output = dig_with_input(repo, &["sync"], "n\nn\n");
+        let output = dgr_with_input(repo, &["sync"], "n\nn\n");
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(output.status.success());
@@ -849,7 +849,7 @@ fn sync_skips_recreating_remotely_merged_root_branch_when_cleanup_is_declined() 
 
 #[test]
 fn sync_repairs_closed_child_pull_request_after_remote_parent_branch_deletion() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         setup_remotely_merged_root_branch_with_children(
             repo,
             &[("feat/auth-ui", "ui.txt", "ui\n", "feat: ui")],
@@ -860,9 +860,9 @@ fn sync_repairs_closed_child_pull_request_after_remote_parent_branch_deletion() 
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "234" ]; then
-  printf '{"number":234,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/acme/dig/pull/234"}\n'
+  printf '{"number":234,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/234"}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "reopen" ] && [ "$3" = "234" ]; then
@@ -879,13 +879,13 @@ exit 1
 "#,
         );
 
-        let output = dig_with_input_and_env(
+        let output = dgr_with_input_and_env(
             repo,
             &["sync"],
             "y\nn\n",
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -929,7 +929,7 @@ exit 1
 
 #[test]
 fn sync_repairs_multiple_child_pull_requests_with_one_temporary_parent_restore() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         setup_remotely_merged_root_branch_with_children(
             repo,
             &[
@@ -945,13 +945,13 @@ fn sync_repairs_multiple_child_pull_requests_with_one_temporary_parent_restore()
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "111" ]; then
-  printf '{"number":111,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-api","isDraft":false,"url":"https://github.com/acme/dig/pull/111"}\n'
+  printf '{"number":111,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-api","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/111"}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "222" ]; then
-  printf '{"number":222,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/acme/dig/pull/222"}\n'
+  printf '{"number":222,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/222"}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "reopen" ]; then
@@ -968,13 +968,13 @@ exit 1
 "#,
         );
 
-        let output = dig_with_input_and_env(
+        let output = dgr_with_input_and_env(
             repo,
             &["sync"],
             "y\nn\n",
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -1006,7 +1006,7 @@ exit 1
 
 #[test]
 fn sync_skips_pull_request_repair_for_open_merged_or_retargeted_children() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         setup_remotely_merged_root_branch_with_children(
             repo,
             &[
@@ -1024,17 +1024,17 @@ fn sync_skips_pull_request_repair_for_open_merged_or_retargeted_children() {
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "301" ]; then
-  printf '{"number":301,"state":"OPEN","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-api","isDraft":false,"url":"https://github.com/acme/dig/pull/301"}\n'
+  printf '{"number":301,"state":"OPEN","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-api","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/301"}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "302" ]; then
-  printf '{"number":302,"state":"CLOSED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/acme/dig/pull/302"}\n'
+  printf '{"number":302,"state":"CLOSED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/302"}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "303" ]; then
-  printf '{"number":303,"state":"CLOSED","mergedAt":null,"baseRefName":"main","headRefName":"feat/auth-tests","isDraft":false,"url":"https://github.com/acme/dig/pull/303"}\n'
+  printf '{"number":303,"state":"CLOSED","mergedAt":null,"baseRefName":"main","headRefName":"feat/auth-tests","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/303"}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "edit" ] && [ "$3" = "301" ] && [ "$4" = "--base" ] && [ "$5" = "main" ]; then
@@ -1045,13 +1045,13 @@ exit 1
 "#,
         );
 
-        let output = dig_with_input_and_env(
+        let output = dgr_with_input_and_env(
             repo,
             &["sync"],
             "y\nn\n",
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -1080,19 +1080,19 @@ exit 1
 
 #[test]
 fn sync_repairs_closed_child_pull_request_when_parent_branch_is_missing_locally() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/root"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/root"]);
         commit_file(repo, "root.txt", "root\n", "feat: root");
         git_ok(repo, &["push", "-u", "origin", "feat/root"]);
         track_pull_request_number(repo, "feat/root", 101);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
         git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
         track_pull_request_number(repo, "feat/auth", 102);
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         commit_file(repo, "ui.txt", "ui\n", "feat: ui");
         git_ok(repo, &["push", "-u", "origin", "feat/auth-ui"]);
         track_pull_request_number(repo, "feat/auth-ui", 103);
@@ -1120,13 +1120,13 @@ fn sync_repairs_closed_child_pull_request_when_parent_branch_is_missing_locally(
             &format!(
                 r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "102" ]; then
-  printf '{{"number":102,"state":"MERGED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/root","headRefName":"feat/auth","headRefOid":"{parent_head_oid}","isDraft":false,"url":"https://github.com/acme/dig/pull/102"}}\n'
+  printf '{{"number":102,"state":"MERGED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/root","headRefName":"feat/auth","headRefOid":"{parent_head_oid}","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/102"}}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "103" ]; then
-  printf '{{"number":103,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/acme/dig/pull/103"}}\n'
+  printf '{{"number":103,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/103"}}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "reopen" ] && [ "$3" = "103" ]; then
@@ -1144,13 +1144,13 @@ exit 1
             ),
         );
 
-        let output = dig_with_input_and_env(
+        let output = dgr_with_input_and_env(
             repo,
             &["sync"],
             "n\n",
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -1164,7 +1164,7 @@ exit 1
         assert!(stdout.contains(
             "- feat/auth-ui (#103): reopened as draft and retargeted from feat/auth to main"
         ));
-        assert!(stdout.contains("Deleted locally and no longer tracked by dig:"));
+        assert!(stdout.contains("Deleted locally and no longer tracked by dagger:"));
         assert!(stdout.contains("- feat/auth"));
         assert!(stdout.contains("Restacked:"));
         assert!(stdout.contains("- feat/auth-ui onto main"));
@@ -1198,19 +1198,19 @@ exit 1
 
 #[test]
 fn sync_removes_local_parent_branch_after_repair_when_parent_was_merged_upstream() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/root"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/root"]);
         commit_file(repo, "root.txt", "root\n", "feat: root");
         git_ok(repo, &["push", "-u", "origin", "feat/root"]);
         track_pull_request_number(repo, "feat/root", 101);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
         git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
         track_pull_request_number(repo, "feat/auth", 102);
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         commit_file(repo, "ui.txt", "ui\n", "feat: ui");
         git_ok(repo, &["push", "-u", "origin", "feat/auth-ui"]);
         track_pull_request_number(repo, "feat/auth-ui", 103);
@@ -1237,13 +1237,13 @@ fn sync_removes_local_parent_branch_after_repair_when_parent_was_merged_upstream
             &format!(
                 r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "102" ]; then
-  printf '{{"number":102,"state":"MERGED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/root","headRefName":"feat/auth","headRefOid":"{parent_head_oid}","isDraft":false,"url":"https://github.com/acme/dig/pull/102"}}\n'
+  printf '{{"number":102,"state":"MERGED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/root","headRefName":"feat/auth","headRefOid":"{parent_head_oid}","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/102"}}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "103" ]; then
-  printf '{{"number":103,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/acme/dig/pull/103"}}\n'
+  printf '{{"number":103,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/103"}}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "reopen" ] && [ "$3" = "103" ]; then
@@ -1261,13 +1261,13 @@ exit 1
             ),
         );
 
-        let output = dig_with_input_and_env(
+        let output = dgr_with_input_and_env(
             repo,
             &["sync"],
             "n\n",
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -1278,7 +1278,7 @@ exit 1
             "stdout:\n{stdout}\nstderr:\n{stderr}"
         );
         assert!(stdout.contains("Recovered pull requests:"));
-        assert!(stdout.contains("Deleted locally and no longer tracked by dig:"));
+        assert!(stdout.contains("Deleted locally and no longer tracked by dagger:"));
         assert!(stdout.contains("- feat/auth"));
         assert_eq!(git_stdout(repo, &["branch", "--list", "feat/auth"]), "");
 
@@ -1296,7 +1296,7 @@ exit 1
 
 #[test]
 fn sync_aborts_before_local_cleanup_when_pull_request_repair_fails() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         setup_remotely_merged_root_branch_with_children(
             repo,
             &[("feat/auth-ui", "ui.txt", "ui\n", "feat: ui")],
@@ -1307,9 +1307,9 @@ fn sync_aborts_before_local_cleanup_when_pull_request_repair_fails() {
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "234" ]; then
-  printf '{"number":234,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/acme/dig/pull/234"}\n'
+  printf '{"number":234,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/234"}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "reopen" ] && [ "$3" = "234" ]; then
@@ -1321,12 +1321,12 @@ exit 1
 "#,
         );
 
-        let output = dig_with_env(
+        let output = dgr_with_env(
             repo,
             &["sync"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -1352,17 +1352,17 @@ exit 1
 
 #[test]
 fn sync_cleans_middle_branch_merged_remotely_and_excludes_it_from_remote_pushes() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
         git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
-        dig_ok(repo, &["branch", "feat/auth-api"]);
+        dgr_ok(repo, &["branch", "feat/auth-api"]);
         commit_file(repo, "api.txt", "api\n", "feat: auth api");
         git_ok(repo, &["push", "-u", "origin", "feat/auth-api"]);
-        dig_ok(repo, &["branch", "feat/auth-api-tests"]);
+        dgr_ok(repo, &["branch", "feat/auth-api-tests"]);
         commit_file(repo, "tests.txt", "tests\n", "feat: tests");
 
         let remote_repo = clone_origin(repo, "origin-worktree");
@@ -1375,7 +1375,7 @@ fn sync_cleans_middle_branch_merged_remotely_and_excludes_it_from_remote_pushes(
         );
         git_ok(&remote_repo, &["push", "origin", "feat/auth"]);
 
-        let output = dig_with_input(repo, &["sync"], "y\nn\n");
+        let output = dgr_with_input(repo, &["sync"], "y\nn\n");
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(output.status.success());
@@ -1405,14 +1405,14 @@ fn sync_cleans_middle_branch_merged_remotely_and_excludes_it_from_remote_pushes(
 
 #[test]
 fn sync_prompts_to_push_missing_remote_branch_after_local_sync() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
 
-        let output = dig_with_input(repo, &["sync"], "y\n");
+        let output = dgr_with_input(repo, &["sync"], "y\n");
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(output.status.success());
@@ -1434,16 +1434,16 @@ fn sync_prompts_to_push_missing_remote_branch_after_local_sync() {
 
 #[test]
 fn sync_prompts_to_push_active_branch_ahead_of_remote() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
         git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth v2\n", "feat: auth follow-up");
 
-        let output = dig_with_input(repo, &["sync"], "y\n");
+        let output = dgr_with_input(repo, &["sync"], "y\n");
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(output.status.success());
@@ -1462,14 +1462,14 @@ fn sync_prompts_to_push_active_branch_ahead_of_remote() {
 
 #[test]
 fn sync_continues_paused_remote_cleanup_with_stored_remote_rebase_target() {
-    with_temp_repo("dig-sync-cli", |repo| {
+    with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: parent");
         git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         commit_file(repo, "conflict.txt", "child\n", "feat: child");
 
         let remote_repo = clone_origin(repo, "origin-worktree");
@@ -1487,11 +1487,11 @@ fn sync_continues_paused_remote_cleanup_with_stored_remote_rebase_target() {
         );
         git_ok(&remote_repo, &["push", "origin", "main"]);
 
-        let paused = dig_with_input(repo, &["sync"], "y\n");
+        let paused = dgr_with_input(repo, &["sync"], "y\n");
         let stderr = String::from_utf8(paused.stderr).unwrap();
 
         assert!(!paused.status.success());
-        assert!(stderr.contains("dig sync --continue"));
+        assert!(stderr.contains("dgr sync --continue"));
 
         let operation = load_operation_json(repo).unwrap();
         assert_eq!(operation["origin"]["type"].as_str(), Some("clean"));
@@ -1513,7 +1513,7 @@ fn sync_continues_paused_remote_cleanup_with_stored_remote_rebase_target() {
         std::fs::write(repo.join("conflict.txt"), "resolved\n").unwrap();
         git_ok(repo, &["add", "conflict.txt"]);
 
-        let resumed = dig_with_input(repo, &["sync", "--continue"], "n\n");
+        let resumed = dgr_with_input(repo, &["sync", "--continue"], "n\n");
         let stdout = strip_ansi(&String::from_utf8(resumed.stdout).unwrap());
 
         assert!(resumed.status.success());

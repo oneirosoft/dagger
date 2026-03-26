@@ -5,10 +5,10 @@ use crate::core::deleted_local;
 use crate::core::git::{self, CherryMarker, CommitMetadata};
 use crate::core::graph::BranchGraph;
 use crate::core::restack::{self, RestackBaseTarget};
-use crate::core::store::types::{BranchDivergenceState, DigState};
+use crate::core::store::types::{BranchDivergenceState, DaggerState};
 use crate::core::store::{
     BranchNode, PendingCleanCandidate, PendingCleanCandidateKind, PendingCleanOperation,
-    StoreSession, dig_paths, load_state, open_initialized, save_state,
+    StoreSession, dagger_paths, load_state, open_initialized, save_state,
 };
 use crate::core::workflow;
 
@@ -73,7 +73,7 @@ pub(crate) fn reconcile_branch_divergence_state(session: &mut StoreSession) -> i
 
 pub(crate) fn plan_for_resume(payload: &PendingCleanOperation) -> io::Result<CleanPlan> {
     let repo = git::resolve_repo_context()?;
-    let store_paths = dig_paths(&repo.git_dir);
+    let store_paths = dagger_paths(&repo.git_dir);
     let state = load_state(&store_paths)?;
     let current_branch = git::current_branch_name_or(&payload.original_branch)?;
     let mut candidates = Vec::with_capacity(1 + payload.remaining_candidates.len());
@@ -111,7 +111,7 @@ pub(crate) fn mode_for_sync(remote_sync_enabled: bool) -> CleanPlanMode {
 
 fn plan_with_mode(options: &CleanOptions, mode: CleanPlanMode) -> io::Result<CleanPlan> {
     workflow::ensure_no_pending_operation_for_command("clean")?;
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     reconcile_branch_divergence_state(&mut session)?;
     let current_branch = git::current_branch_name()?;
     let requested_branch_name = options
@@ -139,7 +139,7 @@ fn plan_with_mode(options: &CleanOptions, mode: CleanPlanMode) -> io::Result<Cle
 }
 
 fn plan_for_requested_branch(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     current_branch: &str,
     branch_name: &str,
@@ -191,7 +191,7 @@ fn plan_for_requested_branch(
 }
 
 fn plan_for_all_branches(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     current_branch: &str,
     mode: CleanPlanMode,
@@ -249,9 +249,9 @@ fn plan_for_all_branches(
 }
 
 fn apply_deleted_step_projection(
-    state: &DigState,
+    state: &DaggerState,
     deleted_steps: &[deleted_local::DeletedLocalBranchStep],
-) -> io::Result<DigState> {
+) -> io::Result<DaggerState> {
     let mut projected_state = state.clone();
 
     for step in deleted_steps {
@@ -262,7 +262,7 @@ fn apply_deleted_step_projection(
 }
 
 fn evaluate_integrated_branch(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     node: &BranchNode,
     mode: CleanPlanMode,
@@ -282,7 +282,7 @@ fn evaluate_integrated_branch(
             Err(_) => {
                 return Ok(BranchEvaluation::Blocked(BlockedBranch {
                     branch_name: node.branch_name.clone(),
-                    reason: CleanBlockReason::ParentMissingFromDig,
+                    reason: CleanBlockReason::ParentMissingFromDagger,
                 }));
             }
         };
@@ -372,7 +372,7 @@ fn evaluate_integrated_branch(
 }
 
 pub(crate) fn cleanup_candidate_for_branch(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     node: &BranchNode,
     mode: CleanPlanMode,
@@ -398,7 +398,7 @@ fn clean_candidate_from_deleted_step(
 }
 
 fn clean_candidate_from_pending_candidate(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     candidate: &PendingCleanCandidate,
 ) -> io::Result<CleanCandidate> {
@@ -500,7 +500,7 @@ fn branch_is_integrated_by_cherry(parent_branch_name: &str, branch_name: &str) -
 }
 
 fn reconciled_branch_divergence_state(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     node: &BranchNode,
 ) -> io::Result<Option<BranchDivergenceState>> {

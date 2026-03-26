@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::core::git::{self, RebaseProgress};
 use crate::core::graph::BranchGraph;
 use crate::core::store::ParentRef;
-use crate::core::store::types::DigState;
+use crate::core::store::types::DaggerState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestackBaseTarget {
@@ -79,7 +79,7 @@ pub struct RestackStepOutcome {
 }
 
 pub fn plan_after_branch_detach(
-    state: &DigState,
+    state: &DaggerState,
     detached_node_id: Uuid,
     detached_branch_name: &str,
     new_parent_base: &RestackBaseTarget,
@@ -103,7 +103,7 @@ pub fn plan_after_branch_detach(
 }
 
 pub fn plan_after_branch_advance(
-    state: &DigState,
+    state: &DaggerState,
     advanced_node_id: Uuid,
     advanced_branch_name: &str,
     old_head_oid: &str,
@@ -126,7 +126,7 @@ pub fn plan_after_branch_advance(
 }
 
 pub fn plan_after_branch_rebase(
-    state: &DigState,
+    state: &DaggerState,
     rebased_node_id: Uuid,
     rebased_branch_name: &str,
     old_upstream_oid: &str,
@@ -160,7 +160,7 @@ pub fn plan_after_branch_rebase(
 }
 
 pub fn plan_after_branch_reparent(
-    state: &DigState,
+    state: &DaggerState,
     node_id: Uuid,
     branch_name: &str,
     current_parent_branch_name: &str,
@@ -196,7 +196,7 @@ pub fn plan_after_branch_reparent(
 }
 
 pub fn plan_after_deleted_branch(
-    state: &DigState,
+    state: &DaggerState,
     deleted_node_id: Uuid,
     deleted_branch_name: &str,
     new_parent_base: &RestackBaseTarget,
@@ -214,7 +214,7 @@ pub fn plan_after_deleted_branch(
 
 #[cfg(test)]
 pub fn plan_after_deleted_branch_with_old_upstream_override(
-    state: &DigState,
+    state: &DaggerState,
     deleted_node_id: Uuid,
     deleted_branch_name: &str,
     new_parent_base: &RestackBaseTarget,
@@ -232,7 +232,7 @@ pub fn plan_after_deleted_branch_with_old_upstream_override(
 }
 
 fn plan_after_deleted_branch_with_optional_old_upstream_override(
-    state: &DigState,
+    state: &DaggerState,
     deleted_node_id: Uuid,
     deleted_branch_name: &str,
     new_parent_base: &RestackBaseTarget,
@@ -285,7 +285,7 @@ pub fn previews_for_actions(actions: &[RestackAction]) -> Vec<RestackPreview> {
 }
 
 pub fn apply_action<F>(
-    state: &mut DigState,
+    state: &mut DaggerState,
     action: &RestackAction,
     on_progress: F,
 ) -> io::Result<RestackStepOutcome>
@@ -318,7 +318,7 @@ where
 }
 
 pub fn finalize_action(
-    state: &mut DigState,
+    state: &mut DaggerState,
     action: &RestackAction,
 ) -> io::Result<Option<ParentChange>> {
     let Some(new_parent) = &action.new_parent else {
@@ -342,7 +342,7 @@ pub fn finalize_action(
 }
 
 fn collect_branch_advance_actions(
-    state: &DigState,
+    state: &DaggerState,
     node_id: Uuid,
     old_upstream_branch_name: &str,
     old_upstream_oid: &str,
@@ -376,7 +376,7 @@ fn collect_branch_advance_actions(
 }
 
 fn collect_restack_actions(
-    state: &DigState,
+    state: &DaggerState,
     node_id: Uuid,
     old_upstream_branch_name: &str,
     new_base: &RestackBaseTarget,
@@ -410,7 +410,7 @@ fn collect_restack_actions(
 }
 
 fn load_active_branch_node(
-    state: &DigState,
+    state: &DaggerState,
     node_id: Uuid,
 ) -> io::Result<crate::core::store::BranchNode> {
     let node = state.find_branch_by_id(node_id).cloned().ok_or_else(|| {
@@ -440,7 +440,7 @@ mod tests {
         plan_after_deleted_branch_with_old_upstream_override, previews_for_actions,
     };
     use crate::core::git;
-    use crate::core::store::types::DIG_STATE_VERSION;
+    use crate::core::store::types::DAGGER_STATE_VERSION;
     use crate::core::store::{BranchDivergenceState, BranchNode, ParentRef};
     use crate::core::test_support::{commit_file, git_ok, initialize_main_repo, with_temp_repo};
     use uuid::Uuid;
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn plans_restack_after_branch_advance_with_old_head_for_immediate_child() {
-        with_temp_repo("dig-restack", |repo| {
+        with_temp_repo("dgr-restack", |repo| {
             initialize_main_repo(repo);
             git_ok(repo, &["checkout", "-b", "feat/auth"]);
             commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -510,8 +510,8 @@ mod tests {
             let parent_id = Uuid::new_v4();
             let child_id = Uuid::new_v4();
             let grandchild_id = Uuid::new_v4();
-            let state = crate::core::store::types::DigState {
-                version: DIG_STATE_VERSION,
+            let state = crate::core::store::types::DaggerState {
+                version: DAGGER_STATE_VERSION,
                 nodes: vec![
                     BranchNode {
                         id: parent_id,
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn uses_deleted_branch_head_override_when_promoting_child() {
-        with_temp_repo("dig-restack", |repo| {
+        with_temp_repo("dgr-restack", |repo| {
             initialize_main_repo(repo);
             git_ok(repo, &["checkout", "-b", "feat/auth"]);
             commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -588,8 +588,8 @@ mod tests {
 
             let parent_id = Uuid::new_v4();
             let child_id = Uuid::new_v4();
-            let state = crate::core::store::types::DigState {
-                version: DIG_STATE_VERSION,
+            let state = crate::core::store::types::DaggerState {
+                version: DAGGER_STATE_VERSION,
                 nodes: vec![
                     BranchNode {
                         id: parent_id,
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn plans_restack_after_branch_reparent_with_parent_change_only_on_target_branch() {
-        with_temp_repo("dig-restack", |repo| {
+        with_temp_repo("dgr-restack", |repo| {
             initialize_main_repo(repo);
             git_ok(repo, &["checkout", "-b", "feat/auth"]);
             commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -659,8 +659,8 @@ mod tests {
             let api_id = Uuid::new_v4();
             let tests_id = Uuid::new_v4();
             let platform_id = Uuid::new_v4();
-            let state = crate::core::store::types::DigState {
-                version: DIG_STATE_VERSION,
+            let state = crate::core::store::types::DaggerState {
+                version: DAGGER_STATE_VERSION,
                 nodes: vec![
                     BranchNode {
                         id: auth_id,

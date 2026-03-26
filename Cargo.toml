@@ -1,8 +1,12 @@
 [package]
-name = "dig"
+name = "dagger"
 version = "0.0.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
+
+[[bin]]
+name = "dgr"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.6.0", features = ["derive"] }

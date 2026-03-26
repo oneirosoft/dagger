@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use support::{
-    dig_ok, dig_ok_with_env, dig_with_input_and_env, find_node, git_binary_path, git_ok,
+    dgr_ok, dgr_ok_with_env, dgr_with_input_and_env, find_node, git_binary_path, git_ok,
     git_stdout, initialize_main_repo, install_fake_executable, load_events_json, load_state_json,
     path_with_prepend, strip_ansi, with_temp_repo,
 };
@@ -25,7 +25,7 @@ fn clear_log(path: &str) {
 }
 
 fn track_pull_request_number(repo: &Path, branch_name: &str, number: u64) {
-    let state_path = repo.join(".git/dig/state.json");
+    let state_path = repo.join(".git/.dagger/state.json");
     let mut state = load_state_json(repo);
     let nodes = state["nodes"].as_array_mut().unwrap();
     let node = nodes
@@ -46,22 +46,22 @@ fn initialize_origin_remote(repo: &Path) {
 
 #[test]
 fn pr_creates_root_pull_request_tracks_number_and_updates_tree() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (_, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/123\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/123\n'
   exit 0
 fi
 echo "unexpected gh args: $*" >&2
@@ -69,7 +69,7 @@ exit 1
 "#,
         );
 
-        let output = dig_ok_with_env(
+        let output = dgr_ok_with_env(
             repo,
             &[
                 "pr",
@@ -81,7 +81,7 @@ exit 1
             ],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -89,7 +89,7 @@ exit 1
         assert!(stdout.contains("Created pull request #123 for 'feat/auth' into 'main'."));
         assert_eq!(
             stdout
-                .matches("https://github.com/acme/dig/pull/123")
+                .matches("https://github.com/oneirosoft/dagger/pull/123")
                 .count(),
             1
         );
@@ -98,7 +98,7 @@ exit 1
         let node = find_node(&state, "feat/auth").unwrap();
         assert_eq!(node["pull_request"]["number"], 123);
 
-        let tree_output = dig_ok(repo, &["tree"]);
+        let tree_output = dgr_ok(repo, &["tree"]);
         let tree_stdout = strip_ansi(&String::from_utf8(tree_output.stdout).unwrap());
         assert!(tree_stdout.contains("feat/auth (#123)"));
 
@@ -122,12 +122,12 @@ exit 1
 
 #[test]
 fn pr_merge_retargets_open_child_pull_request_before_merging_parent() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         track_pull_request_number(repo, "feat/auth", 123);
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         track_pull_request_number(repo, "feat/auth-ui", 124);
         git_ok(repo, &["checkout", "feat/auth"]);
 
@@ -135,9 +135,9 @@ fn pr_merge_retargets_open_child_pull_request_before_merging_parent() {
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "124" ]; then
-  printf '{"number":124,"state":"OPEN","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","headRefOid":"abc123","isDraft":false,"url":"https://github.com/acme/dig/pull/124"}\n'
+  printf '{"number":124,"state":"OPEN","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","headRefOid":"abc123","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/124"}\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "edit" ] && [ "$3" = "124" ] && [ "$4" = "--base" ] && [ "$5" = "main" ]; then
@@ -151,12 +151,12 @@ exit 1
 "#,
         );
 
-        let output = dig_ok_with_env(
+        let output = dgr_ok_with_env(
             repo,
             &["pr", "merge"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -180,35 +180,35 @@ exit 1
 
 #[test]
 fn pr_creates_child_pull_request_against_tracked_parent() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
-        dig_ok(repo, &["branch", "feat/auth-api"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["branch", "feat/auth-api"]);
 
         let (_, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/234\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/234\n'
   exit 0
 fi
 exit 1
 "#,
         );
 
-        let output = dig_ok_with_env(
+        let output = dgr_ok_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -216,7 +216,7 @@ exit 1
         assert!(stdout.contains("Created pull request #234 for 'feat/auth-api' into 'feat/auth'."));
         assert_eq!(
             stdout
-                .matches("https://github.com/acme/dig/pull/234")
+                .matches("https://github.com/oneirosoft/dagger/pull/234")
                 .count(),
             1
         );
@@ -228,22 +228,22 @@ exit 1
 
 #[test]
 fn pr_defaults_body_to_title_when_body_is_omitted() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (_, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/321\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/321\n'
   exit 0
 fi
 echo "unexpected gh args: $*" >&2
@@ -251,12 +251,12 @@ exit 1
 "#,
         );
 
-        let output = dig_ok_with_env(
+        let output = dgr_ok_with_env(
             repo,
             &["pr", "--title", "feat-auth", "--draft"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -264,7 +264,7 @@ exit 1
         assert!(stdout.contains("Created pull request #321 for 'feat/auth' into 'main'."));
         assert_eq!(
             stdout
-                .matches("https://github.com/acme/dig/pull/321")
+                .matches("https://github.com/oneirosoft/dagger/pull/321")
                 .count(),
             1
         );
@@ -278,18 +278,18 @@ exit 1
 
 #[test]
 fn pr_adopts_matching_open_pull_request_without_creating_another() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (_, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
-  printf '[{"number":345,"baseRefName":"main","url":"https://github.com/acme/dig/pull/345"}]\n'
+  printf '[{"number":345,"baseRefName":"main","url":"https://github.com/oneirosoft/dagger/pull/345"}]\n'
   exit 0
 fi
 echo "unexpected gh args: $*" >&2
@@ -297,12 +297,12 @@ exit 1
 "#,
         );
 
-        let output = dig_ok_with_env(
+        let output = dgr_ok_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -328,34 +328,34 @@ exit 1
 
 #[test]
 fn pr_is_idempotent_when_branch_already_tracks_pull_request() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (bin_dir, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/456\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/456\n'
   exit 0
 fi
 exit 1
 "#,
         );
 
-        dig_ok_with_env(
+        dgr_ok_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
 
@@ -364,18 +364,18 @@ exit 1
             "gh",
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 echo "gh should not have been called" >&2
 exit 99
 "#,
         );
 
-        let output = dig_ok_with_env(
+        let output = dgr_ok_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -389,34 +389,34 @@ exit 99
 
 #[test]
 fn pr_with_view_only_opens_tracked_pull_request_in_browser() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (bin_dir, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/456\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/456\n'
   exit 0
 fi
 exit 1
 "#,
         );
 
-        dig_ok_with_env(
+        dgr_ok_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
 
@@ -426,7 +426,7 @@ exit 1
             "gh",
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "456" ] && [ "$4" = "--web" ]; then
   exit 0
 fi
@@ -435,12 +435,12 @@ exit 1
 "#,
         );
 
-        let output = dig_ok_with_env(
+        let output = dgr_ok_with_env(
             repo,
             &["pr", "--view"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
 
@@ -452,22 +452,22 @@ exit 1
 
 #[test]
 fn pr_with_create_and_view_opens_browser_after_tracking() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (_, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/123\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/123\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "123" ] && [ "$4" = "--web" ]; then
@@ -478,12 +478,12 @@ exit 1
 "#,
         );
 
-        let output = dig_ok_with_env(
+        let output = dgr_ok_with_env(
             repo,
             &["pr", "--title", "feat-auth", "--view"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -491,7 +491,7 @@ exit 1
         assert!(stdout.contains("Created pull request #123 for 'feat/auth' into 'main'."));
         assert_eq!(
             stdout
-                .matches("https://github.com/acme/dig/pull/123")
+                .matches("https://github.com/oneirosoft/dagger/pull/123")
                 .count(),
             1
         );
@@ -511,23 +511,23 @@ exit 1
 
 #[test]
 fn pr_prompts_to_push_branch_before_creating_pull_request() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (_, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/777\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/777\n'
   exit 0
 fi
 echo "unexpected gh args: $*" >&2
@@ -535,13 +535,13 @@ exit 1
 "#,
         );
 
-        let output = dig_with_input_and_env(
+        let output = dgr_with_input_and_env(
             repo,
             &["pr"],
             "y\n",
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         assert!(output.status.success());
@@ -551,7 +551,7 @@ exit 1
         assert!(stdout.contains("Created pull request #777 for 'feat/auth' into 'main'."));
         assert_eq!(
             stdout
-                .matches("https://github.com/acme/dig/pull/777")
+                .matches("https://github.com/oneirosoft/dagger/pull/777")
                 .count(),
             1
         );
@@ -576,17 +576,17 @@ exit 1
 
 #[test]
 fn pr_declining_push_skips_pull_request_creation() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (_, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
@@ -596,13 +596,13 @@ exit 1
 "#,
         );
 
-        let output = dig_with_input_and_env(
+        let output = dgr_with_input_and_env(
             repo,
             &["pr"],
             "n\n",
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         assert!(output.status.success());
@@ -631,15 +631,15 @@ exit 1
 
 #[test]
 fn pr_list_renders_open_tracked_pull_requests_in_lineage_order() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
+        dgr_ok(repo, &["init"]);
 
         let (bin_dir, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
@@ -647,11 +647,11 @@ fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
   current_branch="$(git branch --show-current)"
   if [ "$current_branch" = "feat/auth" ]; then
-    printf 'https://github.com/acme/dig/pull/101\n'
+    printf 'https://github.com/oneirosoft/dagger/pull/101\n'
     exit 0
   fi
   if [ "$current_branch" = "feat/auth-ui" ]; then
-    printf 'https://github.com/acme/dig/pull/102\n'
+    printf 'https://github.com/oneirosoft/dagger/pull/102\n'
     exit 0
   fi
 fi
@@ -660,22 +660,22 @@ exit 1
 "#,
         );
 
-        dig_ok(repo, &["branch", "feat/auth"]);
-        dig_ok_with_env(
+        dgr_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
-        dig_ok_with_env(
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
 
@@ -685,9 +685,9 @@ exit 1
             "gh",
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ] && [ "$3" = "--state" ] && [ "$4" = "open" ]; then
-  printf '[{"number":101,"title":"Auth PR","url":"https://github.com/acme/dig/pull/101"},{"number":102,"title":"Auth UI PR","url":"https://github.com/acme/dig/pull/102"},{"number":999,"title":"External PR","url":"https://github.com/acme/dig/pull/999"}]\n'
+  printf '[{"number":101,"title":"Auth PR","url":"https://github.com/oneirosoft/dagger/pull/101"},{"number":102,"title":"Auth UI PR","url":"https://github.com/oneirosoft/dagger/pull/102"},{"number":999,"title":"External PR","url":"https://github.com/oneirosoft/dagger/pull/999"}]\n'
   exit 0
 fi
 echo "unexpected gh args: $*" >&2
@@ -695,73 +695,75 @@ exit 1
 "#,
         );
 
-        let output = dig_ok_with_env(
+        let output = dgr_ok_with_env(
             repo,
             &["pr", "list"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("main"));
-        assert!(stdout.contains("#101: Auth PR - https://github.com/acme/dig/pull/101"));
-        assert!(stdout.contains("#102: Auth UI PR - https://github.com/acme/dig/pull/102"));
+        assert!(stdout.contains("#101: Auth PR - https://github.com/oneirosoft/dagger/pull/101"));
+        assert!(
+            stdout.contains("#102: Auth UI PR - https://github.com/oneirosoft/dagger/pull/102")
+        );
         assert!(!stdout.contains("#999: External PR"));
     });
 }
 
 #[test]
 fn pr_list_with_view_opens_each_listed_pull_request() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (bin_dir, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/301\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/301\n'
   exit 0
 fi
 exit 1
 "#,
         );
 
-        dig_ok_with_env(
+        dgr_ok_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         install_fake_executable(
             &bin_dir,
             "gh",
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   current_branch="$(git branch --show-current)"
   if [ "$current_branch" = "feat/auth-ui" ] && [ "$3" = "--head" ]; then
     printf '[]\n'
     exit 0
   fi
-  printf '[{"number":301,"title":"Auth PR","url":"https://github.com/acme/dig/pull/301"},{"number":302,"title":"Auth UI PR","url":"https://github.com/acme/dig/pull/302"}]\n'
+  printf '[{"number":301,"title":"Auth PR","url":"https://github.com/oneirosoft/dagger/pull/301"},{"number":302,"title":"Auth UI PR","url":"https://github.com/oneirosoft/dagger/pull/302"}]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/302\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/302\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$4" = "--web" ]; then
@@ -771,12 +773,12 @@ echo "unexpected gh args: $*" >&2
 exit 1
 "#,
         );
-        dig_ok_with_env(
+        dgr_ok_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
 
@@ -786,9 +788,9 @@ exit 1
             "gh",
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ] && [ "$3" = "--state" ] && [ "$4" = "open" ]; then
-  printf '[{"number":301,"title":"Auth PR","url":"https://github.com/acme/dig/pull/301"},{"number":302,"title":"Auth UI PR","url":"https://github.com/acme/dig/pull/302"}]\n'
+  printf '[{"number":301,"title":"Auth PR","url":"https://github.com/oneirosoft/dagger/pull/301"},{"number":302,"title":"Auth UI PR","url":"https://github.com/oneirosoft/dagger/pull/302"}]\n'
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$4" = "--web" ]; then
@@ -799,12 +801,12 @@ exit 1
 "#,
         );
 
-        dig_ok_with_env(
+        dgr_ok_with_env(
             repo,
             &["pr", "list", "--view"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
 
@@ -824,30 +826,30 @@ exit 1
 
 #[test]
 fn pr_rejects_existing_open_pull_request_with_wrong_base() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (_, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
-  printf '[{"number":567,"baseRefName":"develop","url":"https://github.com/acme/dig/pull/567"}]\n'
+  printf '[{"number":567,"baseRefName":"develop","url":"https://github.com/oneirosoft/dagger/pull/567"}]\n'
   exit 0
 fi
 exit 1
 "#,
         );
 
-        let output = support::dig_with_env(
+        let output = support::dgr_with_env(
             repo,
             &["pr"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
 
@@ -863,10 +865,10 @@ exit 1
 
 #[test]
 fn pr_reports_missing_gh_cli() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let bin_dir = repo.join("fake-bin");
         let git_path = git_binary_path();
@@ -877,7 +879,7 @@ fn pr_reports_missing_gh_cli() {
         );
         let path = bin_dir.display().to_string();
 
-        let output = support::dig_with_env(repo, &["pr"], &[("PATH", path.as_str())]);
+        let output = support::dgr_with_env(repo, &["pr"], &[("PATH", path.as_str())]);
 
         assert!(!output.status.success());
         let stderr = String::from_utf8(output.stderr).unwrap();
@@ -887,16 +889,16 @@ fn pr_reports_missing_gh_cli() {
 
 #[test]
 fn pr_hides_gh_usage_output_when_create_fails() {
-    with_temp_repo("dig-pr-cli", |repo| {
+    with_temp_repo("dgr-pr-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (_, path, log_path) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
-printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+printf '%s\n' "$*" >> "$DGR_TEST_GH_LOG"
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '[]\n'
   exit 0
@@ -917,12 +919,12 @@ exit 1
 "#,
         );
 
-        let output = support::dig_with_env(
+        let output = support::dgr_with_env(
             repo,
             &["pr", "--title", "feat-auth", "--draft"],
             &[
                 ("PATH", path.as_str()),
-                ("DIG_TEST_GH_LOG", log_path.as_str()),
+                ("DGR_TEST_GH_LOG", log_path.as_str()),
             ],
         );
 

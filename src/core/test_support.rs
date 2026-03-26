@@ -30,8 +30,8 @@ pub(crate) fn with_temp_repo(prefix: &str, test: impl FnOnce(&Path)) {
 pub(crate) fn initialize_main_repo(repo: &Path) {
     git_ok(repo, &["init", "--quiet"]);
     git_ok(repo, &["checkout", "-b", "main"]);
-    git_ok(repo, &["config", "user.name", "Dig Test"]);
-    git_ok(repo, &["config", "user.email", "dig@example.com"]);
+    git_ok(repo, &["config", "user.name", "Dagger Test"]);
+    git_ok(repo, &["config", "user.email", "dagger@example.com"]);
     git_ok(repo, &["config", "commit.gpgsign", "false"]);
     commit_file(repo, "README.md", "root\n", "chore: init");
 }
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn git_output_trims_trailing_newlines() {
-        with_temp_repo("dig-core-test-support", |repo| {
+        with_temp_repo("dgr-core-test-support", |repo| {
             initialize_main_repo(repo);
 
             assert_eq!(git_output(repo, &["branch", "--show-current"]), "main");

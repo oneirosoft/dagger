@@ -7,7 +7,7 @@ use crate::core::deleted_local;
 use crate::core::gh::{self, PullRequestState, PullRequestStatus};
 use crate::core::graph::BranchGraph;
 use crate::core::restack::{self, RestackAction, RestackPreview};
-use crate::core::store::types::DigState;
+use crate::core::store::types::DaggerState;
 use crate::core::store::{
     BranchNode, ParentRef, PendingOperationKind, PendingOperationState, PendingSyncOperation,
     PendingSyncPhase, clear_operation, load_operation, open_initialized,
@@ -189,14 +189,14 @@ where
         return run_full_sync_with_reporter(reporter);
     }
 
-    let session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let pending_operation = load_operation(&session.paths)?
-        .ok_or_else(|| io::Error::other("no paused dig operation to resume"))?;
+        .ok_or_else(|| io::Error::other("no paused dgr operation to resume"))?;
 
     if !git::is_rebase_in_progress(&session.repo) {
         clear_operation(&session.paths)?;
         return Err(io::Error::other(format!(
-            "paused dig {} operation is stale; rerun the original command",
+            "paused dgr {} operation is stale; rerun the original command",
             pending_operation.origin.command_name()
         )));
     }
@@ -311,7 +311,7 @@ fn run_full_sync_with_reporter<F>(reporter: &mut F) -> io::Result<SyncOutcome>
 where
     F: FnMut(SyncEvent) -> io::Result<()>,
 {
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     workflow::ensure_ready_for_operation(&session.repo, "sync")?;
     workflow::ensure_no_pending_operation(&session.paths, "sync")?;
     clean::reconcile_branch_divergence_state(&mut session)?;
@@ -347,7 +347,7 @@ fn resume_full_sync_with_reporter<F>(
 where
     F: FnMut(SyncEvent) -> io::Result<()>,
 {
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     clean::reconcile_branch_divergence_state(&mut session)?;
     let mut progress = LocalSyncProgress {
         repaired_pull_requests: Vec::new(),
@@ -594,7 +594,7 @@ fn plan_outdated_branch_step(
         )
         .map_err(|_| {
             io::Error::other(format!(
-                "tracked parent for '{}' is missing from dig",
+                "tracked parent for '{}' is missing from dagger",
                 node.branch_name
             ))
         })?;
@@ -899,7 +899,7 @@ fn delete_local_branches_merged_into_deleted_parent_branches(
 }
 
 fn parent_branch_is_unavailable_for_sync_cleanup(
-    state: &DigState,
+    state: &DaggerState,
     node: &BranchNode,
 ) -> io::Result<bool> {
     let ParentRef::Branch { node_id } = node.parent else {
@@ -1126,7 +1126,7 @@ pub fn plan_remote_pushes(
     restacked_branch_names: &[String],
     excluded_branch_names: &[String],
 ) -> io::Result<RemotePushPlan> {
-    let session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let excluded_branch_names = excluded_branch_names
         .iter()
         .cloned()
@@ -1210,7 +1210,7 @@ pub fn execute_remote_push_plan(plan: &RemotePushPlan) -> io::Result<RemotePushO
 pub fn plan_pull_request_updates(
     restacked_branch_names: &[String],
 ) -> io::Result<PullRequestUpdatePlan> {
-    let session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let candidate_branch_names = dedup_branch_names(restacked_branch_names);
     let mut actions = Vec::new();
 
@@ -1359,7 +1359,7 @@ mod tests {
 
     #[test]
     fn plans_force_pushes_and_missing_remote_branches_while_excluding_cleanup_candidates() {
-        with_temp_repo("dig-sync-core", |repo| {
+        with_temp_repo("dgr-sync-core", |repo| {
             initialize_main_repo(repo);
             initialize_origin_remote(repo);
             create_tracked_branch("feat/auth");
@@ -1401,7 +1401,7 @@ mod tests {
 
     #[test]
     fn plans_fast_forward_pushes_for_active_branches_ahead_of_remote() {
-        with_temp_repo("dig-sync-core", |repo| {
+        with_temp_repo("dgr-sync-core", |repo| {
             initialize_main_repo(repo);
             initialize_origin_remote(repo);
             create_tracked_branch("feat/auth");
@@ -1436,7 +1436,7 @@ mod tests {
                 head_ref_name: "feat/auth-ui".into(),
                 head_ref_oid: None,
                 is_draft: false,
-                url: "https://github.com/acme/dig/pull/42".into(),
+                url: "https://github.com/oneirosoft/dagger/pull/42".into(),
             },
             "feat/auth-ui",
             "feat/auth",
@@ -1450,7 +1450,7 @@ mod tests {
                 head_ref_name: "feat/auth-ui".into(),
                 head_ref_oid: None,
                 is_draft: false,
-                url: "https://github.com/acme/dig/pull/42".into(),
+                url: "https://github.com/oneirosoft/dagger/pull/42".into(),
             },
             "feat/auth-ui",
             "feat/auth",
@@ -1464,7 +1464,7 @@ mod tests {
                 head_ref_name: "feat/auth-ui".into(),
                 head_ref_oid: None,
                 is_draft: false,
-                url: "https://github.com/acme/dig/pull/42".into(),
+                url: "https://github.com/oneirosoft/dagger/pull/42".into(),
             },
             "feat/auth-ui",
             "feat/auth",
@@ -1478,7 +1478,7 @@ mod tests {
                 head_ref_name: "feat/auth-ui".into(),
                 head_ref_oid: None,
                 is_draft: false,
-                url: "https://github.com/acme/dig/pull/42".into(),
+                url: "https://github.com/oneirosoft/dagger/pull/42".into(),
             },
             "feat/auth-ui",
             "feat/auth",
@@ -1492,7 +1492,7 @@ mod tests {
                 head_ref_name: "feat/auth-api".into(),
                 head_ref_oid: None,
                 is_draft: false,
-                url: "https://github.com/acme/dig/pull/42".into(),
+                url: "https://github.com/oneirosoft/dagger/pull/42".into(),
             },
             "feat/auth-ui",
             "feat/auth",
@@ -1501,7 +1501,7 @@ mod tests {
 
     #[test]
     fn emits_local_sync_restack_events_for_outdated_branch_restack() {
-        with_temp_repo("dig-sync-core", |repo| {
+        with_temp_repo("dgr-sync-core", |repo| {
             initialize_main_repo(repo);
             crate::core::init::run(&crate::core::init::InitOptions::default()).unwrap();
             create_tracked_branch("feat/auth");
@@ -1556,7 +1556,7 @@ mod tests {
 
     #[test]
     fn archives_deleted_local_branch_before_descendant_restack_events() {
-        with_temp_repo("dig-sync-core", |repo| {
+        with_temp_repo("dgr-sync-core", |repo| {
             initialize_main_repo(repo);
             crate::core::init::run(&crate::core::init::InitOptions::default()).unwrap();
             create_tracked_branch("feat/auth");
@@ -1602,7 +1602,7 @@ mod tests {
 
     #[test]
     fn resumes_sync_with_completed_snapshot_and_active_branch() {
-        with_temp_repo("dig-sync-core", |repo| {
+        with_temp_repo("dgr-sync-core", |repo| {
             initialize_main_repo(repo);
             crate::core::init::run(&crate::core::init::InitOptions::default()).unwrap();
             create_tracked_branch("feat/auth");

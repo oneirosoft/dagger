@@ -82,7 +82,7 @@ pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
     if session.state.find_branch_by_name(&branch_name).is_some() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            format!("branch '{}' is already tracked by dig", branch_name),
+            format!("branch '{}' is already tracked by dagger", branch_name),
         ));
     }
 
@@ -109,7 +109,7 @@ pub fn plan(options: &AdoptOptions) -> io::Result<AdoptPlan> {
 }
 
 pub fn apply(plan: &AdoptPlan) -> io::Result<AdoptOutcome> {
-    let mut session = open_initialized("dig is not initialized")?;
+    let mut session = open_initialized("dagger is not initialized")?;
     workflow::ensure_ready_for_operation(&session.repo, "adopt")?;
     workflow::ensure_no_pending_operation(&session.paths, "adopt")?;
 
@@ -120,7 +120,7 @@ pub fn apply(plan: &AdoptPlan) -> io::Result<AdoptOutcome> {
     {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            format!("branch '{}' is already tracked by dig", plan.branch_name),
+            format!("branch '{}' is already tracked by dagger", plan.branch_name),
         ));
     }
 
@@ -243,7 +243,7 @@ pub(crate) fn resume_after_sync(
     pending_operation: PendingOperationState,
     payload: PendingAdoptOperation,
 ) -> io::Result<AdoptOutcome> {
-    let mut session = open_initialized("dig is not initialized")?;
+    let mut session = open_initialized("dagger is not initialized")?;
     let rebase_outcome = workflow::continue_resumable_restack_operation(
         &mut session,
         pending_operation,
@@ -304,7 +304,7 @@ mod tests {
 
     use super::{AdoptOptions, apply, plan, resolve_branch_name};
     use crate::core::git;
-    use crate::core::store::{DigEvent, ParentRef, dig_paths, load_state};
+    use crate::core::store::{DaggerEvent, ParentRef, dagger_paths, load_state};
     use crate::core::test_support::{
         commit_file, create_tracked_branch, git_ok, initialize_main_repo, with_temp_repo,
     };
@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn rejects_tracked_branch_adoption() {
-        with_temp_repo("dig-adopt", |repo| {
+        with_temp_repo("dgr-adopt", |repo| {
             initialize_main_repo(repo);
             create_tracked_branch("feat/auth");
 
@@ -336,14 +336,14 @@ mod tests {
             assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
             assert_eq!(
                 error.to_string(),
-                "branch 'feat/auth' is already tracked by dig"
+                "branch 'feat/auth' is already tracked by dagger"
             );
         });
     }
 
     #[test]
     fn rejects_adopting_trunk_branch() {
-        with_temp_repo("dig-adopt", |repo| {
+        with_temp_repo("dgr-adopt", |repo| {
             initialize_main_repo(repo);
 
             let error = plan(&AdoptOptions {
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn rejects_untracked_parent_branch() {
-        with_temp_repo("dig-adopt", |repo| {
+        with_temp_repo("dgr-adopt", |repo| {
             initialize_main_repo(repo);
             git_ok(repo, &["checkout", "-b", "feat/child"]);
             git_ok(repo, &["checkout", "main"]);
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn plans_rebase_for_sibling_branch_adoption() {
-        with_temp_repo("dig-adopt", |repo| {
+        with_temp_repo("dgr-adopt", |repo| {
             initialize_main_repo(repo);
             create_tracked_branch("feat/auth");
             commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn adopts_branch_and_records_post_adopt_metadata() {
-        with_temp_repo("dig-adopt", |repo| {
+        with_temp_repo("dgr-adopt", |repo| {
             initialize_main_repo(repo);
             create_tracked_branch("feat/auth");
             commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -429,7 +429,7 @@ mod tests {
             assert_eq!(git::current_branch_name().unwrap(), "feat/auth");
 
             let repo_context = git::resolve_repo_context().unwrap();
-            let state = load_state(&dig_paths(&repo_context.git_dir)).unwrap();
+            let state = load_state(&dagger_paths(&repo_context.git_dir)).unwrap();
             let parent = state.find_branch_by_name("feat/auth").unwrap();
             let adopted = state.find_branch_by_name("feat/auth-ui").unwrap();
 
@@ -442,10 +442,10 @@ mod tests {
             );
 
             let events =
-                fs::read_to_string(repo_context.git_dir.join("dig/events.ndjson")).unwrap();
+                fs::read_to_string(repo_context.git_dir.join(".dagger/events.ndjson")).unwrap();
             assert!(events.lines().any(|line| {
-                serde_json::from_str::<DigEvent>(line)
-                    .map(|event| matches!(event, DigEvent::BranchAdopted(_)))
+                serde_json::from_str::<DaggerEvent>(line)
+                    .map(|event| matches!(event, DaggerEvent::BranchAdopted(_)))
                     .unwrap_or(false)
             }));
         });

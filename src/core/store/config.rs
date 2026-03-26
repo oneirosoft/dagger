@@ -1,10 +1,10 @@
 use std::fs;
 use std::io;
 
-use super::fs::{DigPaths, ensure_store_dir, write_atomic};
-use super::types::DigConfig;
+use super::fs::{DaggerPaths, ensure_store_dir, write_atomic};
+use super::types::DaggerConfig;
 
-pub fn load_config(paths: &DigPaths) -> io::Result<Option<DigConfig>> {
+pub fn load_config(paths: &DaggerPaths) -> io::Result<Option<DaggerConfig>> {
     if !paths.config_file.exists() {
         return Ok(None);
     }
@@ -16,7 +16,7 @@ pub fn load_config(paths: &DigPaths) -> io::Result<Option<DigConfig>> {
     Ok(Some(config))
 }
 
-pub fn save_config(paths: &DigPaths, config: &DigConfig) -> io::Result<()> {
+pub fn save_config(paths: &DaggerPaths, config: &DaggerConfig) -> io::Result<()> {
     ensure_store_dir(paths)?;
 
     let bytes = serde_json::to_vec_pretty(config)

@@ -289,6 +289,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagger"
+version = "0.0.1"
+dependencies = [
+ "clap",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -357,17 +368,6 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "dig"
-version = "0.0.1"
-dependencies = [
- "clap",
- "ratatui",
- "serde",
- "serde_json",
- "uuid",
 ]
 
 [[package]]

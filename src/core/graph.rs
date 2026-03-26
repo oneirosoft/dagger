@@ -3,7 +3,7 @@ use std::io;
 use uuid::Uuid;
 
 use crate::core::git;
-use crate::core::store::types::DigState;
+use crate::core::store::types::DaggerState;
 use crate::core::store::{BranchNode, ParentRef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,11 +19,11 @@ pub struct BranchLineageNode {
 }
 
 pub struct BranchGraph<'a> {
-    state: &'a DigState,
+    state: &'a DaggerState,
 }
 
 impl<'a> BranchGraph<'a> {
-    pub fn new(state: &'a DigState) -> Self {
+    pub fn new(state: &'a DaggerState) -> Self {
         Self { state }
     }
 
@@ -160,18 +160,18 @@ impl<'a> BranchGraph<'a> {
 #[cfg(test)]
 mod tests {
     use super::{BranchGraph, BranchLineageNode, BranchTreeNode};
-    use crate::core::store::types::{DIG_STATE_VERSION, DigState};
+    use crate::core::store::types::{DAGGER_STATE_VERSION, DaggerState};
     use crate::core::store::{BranchDivergenceState, BranchNode, ParentRef, TrackedPullRequest};
     use uuid::Uuid;
 
-    fn fixture_state() -> (DigState, Uuid, Uuid, Uuid) {
+    fn fixture_state() -> (DaggerState, Uuid, Uuid, Uuid) {
         let parent_id = Uuid::new_v4();
         let child_id = Uuid::new_v4();
         let grandchild_id = Uuid::new_v4();
 
         (
-            DigState {
-                version: DIG_STATE_VERSION,
+            DaggerState {
+                version: DAGGER_STATE_VERSION,
                 nodes: vec![
                     BranchNode {
                         id: parent_id,

@@ -51,7 +51,7 @@ pub struct CreatePullRequestOptions {
 pub struct CreatedPullRequest {
     pub number: u64,
     pub url: String,
-    pub display_url_in_dig: bool,
+    pub display_url_in_dagger: bool,
 }
 
 #[derive(Debug)]
@@ -122,8 +122,8 @@ pub fn list_open_pull_requests_for_head(branch_name: &str) -> io::Result<Vec<Pul
 
 pub fn create_pull_request(options: &CreatePullRequestOptions) -> io::Result<CreatedPullRequest> {
     let args = build_create_pull_request_args(options);
-    let display_url_in_dig = options.title.is_some() || options.body.is_some();
-    let output = if display_url_in_dig {
+    let display_url_in_dagger = options.title.is_some() || options.body.is_some();
+    let output = if display_url_in_dagger {
         run_gh_capture_output(&args)?
     } else {
         run_gh_with_live_output(&args)?
@@ -144,12 +144,12 @@ pub fn create_pull_request(options: &CreatePullRequestOptions) -> io::Result<Cre
         return Ok(CreatedPullRequest {
             number,
             url,
-            display_url_in_dig,
+            display_url_in_dagger,
         });
     }
 
     let mut created_pull_request = view_pull_request_by_url(&url)?;
-    created_pull_request.display_url_in_dig = display_url_in_dig;
+    created_pull_request.display_url_in_dagger = display_url_in_dagger;
     Ok(created_pull_request)
 }
 
@@ -260,7 +260,7 @@ fn view_pull_request_by_url(url: &str) -> io::Result<CreatedPullRequest> {
     Ok(CreatedPullRequest {
         number: record.number,
         url: record.url,
-        display_url_in_dig: false,
+        display_url_in_dagger: false,
     })
 }
 
@@ -521,7 +521,7 @@ mod tests {
     #[test]
     fn parses_open_pull_request_list_output() {
         let pull_requests = parse_open_pull_requests(
-            r#"[{"number":123,"baseRefName":"main","url":"https://github.com/acme/dig/pull/123"}]"#,
+            r#"[{"number":123,"baseRefName":"main","url":"https://github.com/oneirosoft/dagger/pull/123"}]"#,
         )
         .unwrap();
 
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn parses_open_pull_request_details_output() {
         let pull_requests = parse_open_pull_request_details(
-            r#"[{"number":123,"title":"Auth PR","url":"https://github.com/acme/dig/pull/123"}]"#,
+            r#"[{"number":123,"title":"Auth PR","url":"https://github.com/oneirosoft/dagger/pull/123"}]"#,
         )
         .unwrap();
 
@@ -543,7 +543,7 @@ mod tests {
     #[test]
     fn parses_pull_request_status_output() {
         let pull_request = parse_pull_request_status(
-            r#"{"number":123,"state":"CLOSED","mergedAt":null,"baseRefName":"main","headRefName":"feat/auth","isDraft":false,"url":"https://github.com/acme/dig/pull/123"}"#,
+            r#"{"number":123,"state":"CLOSED","mergedAt":null,"baseRefName":"main","headRefName":"feat/auth","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/123"}"#,
         )
         .unwrap();
 
@@ -559,18 +559,18 @@ mod tests {
     #[test]
     fn extracts_pull_request_url_and_number_from_create_output() {
         let url = find_pull_request_url(
-            "Creating pull request for feat/auth into main in acme/dig.\nhttps://github.com/acme/dig/pull/456\n",
+            "Creating pull request for feat/auth into main in oneirosoft/dagger.\nhttps://github.com/oneirosoft/dagger/pull/456\n",
         )
         .unwrap();
 
-        assert_eq!(url, "https://github.com/acme/dig/pull/456");
+        assert_eq!(url, "https://github.com/oneirosoft/dagger/pull/456");
         assert_eq!(pull_request_number_from_url(&url), Some(456));
     }
 
     #[test]
     fn ignores_non_pull_request_urls_when_extracting_number() {
         assert_eq!(
-            pull_request_number_from_url("https://github.com/acme/dig/issues/456"),
+            pull_request_number_from_url("https://github.com/oneirosoft/dagger/issues/456"),
             None
         );
     }

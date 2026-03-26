@@ -2,10 +2,10 @@ use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
 
-use super::fs::{DigPaths, ensure_store_dir};
-use super::types::DigEvent;
+use super::fs::{DaggerPaths, ensure_store_dir};
+use super::types::DaggerEvent;
 
-pub fn append_event(paths: &DigPaths, event: &DigEvent) -> io::Result<()> {
+pub fn append_event(paths: &DaggerPaths, event: &DaggerEvent) -> io::Result<()> {
     ensure_store_dir(paths)?;
 
     let mut file = OpenOptions::new()
@@ -20,7 +20,7 @@ pub fn append_event(paths: &DigPaths, event: &DigEvent) -> io::Result<()> {
     Ok(())
 }
 
-pub fn ensure_events_file(paths: &DigPaths) -> io::Result<bool> {
+pub fn ensure_events_file(paths: &DaggerPaths) -> io::Result<bool> {
     ensure_store_dir(paths)?;
 
     match OpenOptions::new()

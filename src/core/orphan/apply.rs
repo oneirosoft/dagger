@@ -12,7 +12,7 @@ use crate::core::workflow;
 use super::types::{OrphanOutcome, OrphanPlan};
 
 pub(crate) fn apply(plan: &OrphanPlan) -> io::Result<OrphanOutcome> {
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     workflow::ensure_ready_for_operation(&session.repo, "orphan")?;
     workflow::ensure_no_pending_operation(&session.paths, "orphan")?;
 
@@ -26,7 +26,7 @@ pub(crate) fn apply(plan: &OrphanPlan) -> io::Result<OrphanOutcome> {
         .parent_branch_name(&node, &session.config.trunk_branch)
         .ok_or_else(|| {
             io::Error::other(format!(
-                "tracked parent for '{}' is missing from dig",
+                "tracked parent for '{}' is missing from dagger",
                 plan.branch_name
             ))
         })?;
@@ -84,7 +84,7 @@ pub(crate) fn resume_after_sync(
     pending_operation: PendingOperationState,
     payload: PendingOrphanOperation,
 ) -> io::Result<OrphanOutcome> {
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let restack_outcome = workflow::continue_resumable_restack_operation(
         &mut session,
         pending_operation,

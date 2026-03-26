@@ -2,9 +2,9 @@ use std::io;
 
 use super::config::save_config;
 use super::events::ensure_events_file;
-use super::fs::DigPaths;
+use super::fs::DaggerPaths;
 use super::state::save_state;
-use super::types::{DigConfig, DigState};
+use super::types::{DaggerConfig, DaggerState};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StoreInitialization {
@@ -19,16 +19,19 @@ impl StoreInitialization {
     }
 }
 
-pub fn initialize_store(paths: &DigPaths, trunk_branch: &str) -> io::Result<StoreInitialization> {
+pub fn initialize_store(
+    paths: &DaggerPaths,
+    trunk_branch: &str,
+) -> io::Result<StoreInitialization> {
     let mut initialization = StoreInitialization::default();
 
     if !paths.config_file.exists() {
-        save_config(paths, &DigConfig::new(trunk_branch.to_string()))?;
+        save_config(paths, &DaggerConfig::new(trunk_branch.to_string()))?;
         initialization.created_config = true;
     }
 
     if !paths.state_file.exists() {
-        save_state(paths, &DigState::default())?;
+        save_state(paths, &DaggerState::default())?;
         initialization.created_state = true;
     }
 

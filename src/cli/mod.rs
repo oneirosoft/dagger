@@ -19,7 +19,7 @@ use std::process::ExitStatus;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "dig")]
+#[command(name = "dgr")]
 #[command(about = "Git wrapper for stacked PR workflows")]
 struct Cli {
     #[command(subcommand)]
@@ -28,10 +28,10 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Adopt an existing local branch under a tracked dig parent
+    /// Adopt an existing local branch under a tracked dagger parent
     Adopt(adopt::AdoptArgs),
 
-    /// Create a new branch from the currently checked out branch and track it in dig
+    /// Create a new branch from the currently checked out branch and track it in dagger
     Branch(branch::BranchArgs),
 
     /// Stop tracking missing local branches and clean merged tracked branches
@@ -46,7 +46,7 @@ enum Commands {
     /// Merge a tracked branch into its tracked base and restack descendants
     Merge(merge::MergeArgs),
 
-    /// Stop tracking a branch in dig while keeping the local branch
+    /// Stop tracking a branch in dagger while keeping the local branch
     Orphan(orphan::OrphanArgs),
 
     /// Create or adopt a GitHub pull request for the current tracked branch
@@ -92,7 +92,7 @@ fn exit_code_from_result(result: io::Result<CommandOutcome>) -> ExitCode {
         Ok(outcome) if outcome.status.success() => ExitCode::SUCCESS,
         Ok(outcome) => ExitCode::from(outcome.status.code().unwrap_or(1) as u8),
         Err(err) => {
-            eprintln!("dig: {err}");
+            eprintln!("dgr: {err}");
             ExitCode::FAILURE
         }
     }

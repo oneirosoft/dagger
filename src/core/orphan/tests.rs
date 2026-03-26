@@ -2,14 +2,14 @@ use std::io;
 
 use super::{OrphanOptions, apply, plan};
 use crate::core::git;
-use crate::core::store::{ParentRef, dig_paths, load_state};
+use crate::core::store::{ParentRef, dagger_paths, load_state};
 use crate::core::test_support::{
     commit_file, create_tracked_branch, git_ok, initialize_main_repo, with_temp_repo,
 };
 
 #[test]
 fn rejects_orphaning_trunk_branch() {
-    with_temp_repo("dig-orphan", |repo| {
+    with_temp_repo("dgr-orphan", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/bootstrap");
 
@@ -25,7 +25,7 @@ fn rejects_orphaning_trunk_branch() {
 
 #[test]
 fn orphans_tracked_branch_and_restacks_descendants() {
-    with_temp_repo("dig-orphan", |repo| {
+    with_temp_repo("dgr-orphan", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -55,7 +55,7 @@ fn orphans_tracked_branch_and_restacks_descendants() {
         assert_eq!(git::current_branch_name().unwrap(), "feat/auth");
 
         let repo_context = git::resolve_repo_context().unwrap();
-        let state = load_state(&dig_paths(&repo_context.git_dir)).unwrap();
+        let state = load_state(&dagger_paths(&repo_context.git_dir)).unwrap();
         let child = state.find_branch_by_name("feat/auth-ui").unwrap();
 
         assert_eq!(child.parent, ParentRef::Trunk);

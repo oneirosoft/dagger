@@ -3,10 +3,10 @@ use std::process::ExitStatus;
 
 use crate::core::git::{self, RebaseProgress, RepoContext};
 use crate::core::restack::{self, RestackAction, RestackPreview};
-use crate::core::store::fs::DigPaths;
+use crate::core::store::fs::DaggerPaths;
 use crate::core::store::session::StoreSession;
 use crate::core::store::{
-    PendingOperationKind, PendingOperationState, clear_operation, dig_paths, load_config,
+    PendingOperationKind, PendingOperationState, clear_operation, dagger_paths, load_config,
     load_operation, record_branch_reparented, save_operation,
 };
 
@@ -50,7 +50,7 @@ pub(crate) fn ensure_no_pending_operation_for_command(command_name: &str) -> io:
         return Ok(());
     };
 
-    let paths = dig_paths(&repo.git_dir);
+    let paths = dagger_paths(&repo.git_dir);
     if load_config(&paths)?.is_none() {
         return Ok(());
     }
@@ -58,7 +58,10 @@ pub(crate) fn ensure_no_pending_operation_for_command(command_name: &str) -> io:
     ensure_no_pending_operation(&paths, command_name)
 }
 
-pub(crate) fn ensure_no_pending_operation(paths: &DigPaths, command_name: &str) -> io::Result<()> {
+pub(crate) fn ensure_no_pending_operation(
+    paths: &DaggerPaths,
+    command_name: &str,
+) -> io::Result<()> {
     let Some(operation) = load_operation(paths)? else {
         return Ok(());
     };
@@ -71,7 +74,7 @@ pub(crate) fn ensure_no_pending_operation(paths: &DigPaths, command_name: &str) 
 
 fn pending_operation_error(command_name: &str, paused_origin: &str) -> io::Error {
     io::Error::other(format!(
-        "dig {command_name} cannot run while a dig {paused_origin} operation is paused; run 'dig sync --continue'"
+        "dgr {command_name} cannot run while a dgr {paused_origin} operation is paused; run 'dgr sync --continue'"
     ))
 }
 
@@ -254,7 +257,8 @@ mod tests {
     use crate::core::git;
     use crate::core::restack;
     use crate::core::store::{
-        PendingCommitOperation, PendingOperationKind, dig_paths, load_operation, open_initialized,
+        PendingCommitOperation, PendingOperationKind, dagger_paths, load_operation,
+        open_initialized,
     };
     use crate::core::test_support::{
         commit_file, create_tracked_branch, git_ok, initialize_main_repo, with_temp_repo,
@@ -262,7 +266,7 @@ mod tests {
 
     #[test]
     fn persists_pending_operation_when_restack_conflicts() {
-        with_temp_repo("dig-workflow", |repo| {
+        with_temp_repo("dgr-workflow", |repo| {
             initialize_main_repo(repo);
             create_tracked_branch("feat/auth");
             commit_file(repo, "shared.txt", "base\n", "feat: auth");
@@ -271,19 +275,20 @@ mod tests {
             git_ok(repo, &["checkout", "feat/auth"]);
 
             let old_head = git::ref_oid("HEAD").unwrap();
-            let state_before = fs::read_to_string(repo.join(".git/dig/state.json")).unwrap();
-            let events_before = fs::read_to_string(repo.join(".git/dig/events.ndjson")).unwrap();
+            let state_before = fs::read_to_string(repo.join(".git/.dagger/state.json")).unwrap();
+            let events_before =
+                fs::read_to_string(repo.join(".git/.dagger/events.ndjson")).unwrap();
 
             commit_file(repo, "shared.txt", "parent\n", "feat: parent follow-up");
 
             let repo_context = git::resolve_repo_context().unwrap();
-            let paths = dig_paths(&repo_context.git_dir);
+            let paths = dagger_paths(&repo_context.git_dir);
             let state = crate::core::store::load_state(&paths).unwrap();
             let node = state.find_branch_by_name("feat/auth").unwrap();
             let actions =
                 restack::plan_after_branch_advance(&state, node.id, &node.branch_name, &old_head)
                     .unwrap();
-            let mut session = open_initialized("dig is not initialized").unwrap();
+            let mut session = open_initialized("dagger is not initialized").unwrap();
 
             let outcome = execute_resumable_restack_operation(
                 &mut session,
@@ -315,11 +320,11 @@ mod tests {
                 "feat/auth-ui"
             );
             assert_eq!(
-                fs::read_to_string(repo.join(".git/dig/state.json")).unwrap(),
+                fs::read_to_string(repo.join(".git/.dagger/state.json")).unwrap(),
                 state_before
             );
             assert_eq!(
-                fs::read_to_string(repo.join(".git/dig/events.ndjson")).unwrap(),
+                fs::read_to_string(repo.join(".git/.dagger/events.ndjson")).unwrap(),
                 events_before
             );
         });

@@ -1,22 +1,22 @@
 mod support;
 
 use support::{
-    active_rebase_head_name, commit_file, dig, dig_ok, events_contain_type, find_node, git_ok,
+    active_rebase_head_name, commit_file, dgr, dgr_ok, events_contain_type, find_node, git_ok,
     git_stdout, initialize_main_repo, load_events_json, load_operation_json, load_state_json,
     overwrite_file, strip_ansi, with_temp_repo,
 };
 
 #[test]
 fn reparents_current_branch_to_trunk_and_records_event() {
-    with_temp_repo("dig-reparent-cli", |repo| {
+    with_temp_repo("dgr-reparent-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         commit_file(repo, "ui.txt", "ui\n", "feat: ui");
 
-        let output = dig_ok(repo, &["reparent", "-p", "main"]);
+        let output = dgr_ok(repo, &["reparent", "-p", "main"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("Reparented 'feat/auth-ui' onto 'main'."));
@@ -51,21 +51,21 @@ fn reparents_current_branch_to_trunk_and_records_event() {
 
 #[test]
 fn reparents_named_branch_to_tracked_parent_and_restores_original_branch() {
-    with_temp_repo("dig-reparent-cli", |repo| {
+    with_temp_repo("dgr-reparent-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-api"]);
+        dgr_ok(repo, &["branch", "feat/auth-api"]);
         commit_file(repo, "api.txt", "api\n", "feat: api");
-        dig_ok(repo, &["branch", "feat/auth-api-tests"]);
+        dgr_ok(repo, &["branch", "feat/auth-api-tests"]);
         commit_file(repo, "tests.txt", "tests\n", "feat: tests");
         git_ok(repo, &["checkout", "main"]);
-        dig_ok(repo, &["branch", "feat/platform"]);
+        dgr_ok(repo, &["branch", "feat/platform"]);
         commit_file(repo, "platform.txt", "platform\n", "feat: platform");
         git_ok(repo, &["checkout", "main"]);
 
-        let output = dig_ok(repo, &["reparent", "feat/auth-api", "-p", "feat/platform"]);
+        let output = dgr_ok(repo, &["reparent", "feat/auth-api", "-p", "feat/platform"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("Reparented 'feat/auth-api' onto 'feat/platform'."));
@@ -102,15 +102,15 @@ fn reparents_named_branch_to_tracked_parent_and_restores_original_branch() {
 
 #[test]
 fn rejects_reparenting_onto_descendant() {
-    with_temp_repo("dig-reparent-cli", |repo| {
+    with_temp_repo("dgr-reparent-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
-        dig_ok(repo, &["branch", "feat/auth-api"]);
+        dgr_ok(repo, &["branch", "feat/auth-api"]);
         commit_file(repo, "api.txt", "api\n", "feat: api");
 
-        let output = dig(repo, &["reparent", "feat/auth", "-p", "feat/auth-api"]);
+        let output = dgr(repo, &["reparent", "feat/auth", "-p", "feat/auth-api"]);
         let stderr = String::from_utf8(output.stderr).unwrap();
 
         assert!(!output.status.success());
@@ -120,23 +120,23 @@ fn rejects_reparenting_onto_descendant() {
 
 #[test]
 fn leaves_rebase_open_when_reparent_conflicts_and_sync_continues() {
-    with_temp_repo("dig-reparent-cli", |repo| {
+    with_temp_repo("dgr-reparent-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
         overwrite_file(repo, "shared.txt", "auth\n", "feat: auth change");
-        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        dgr_ok(repo, &["branch", "feat/auth-ui"]);
         commit_file(repo, "ui.txt", "ui\n", "feat: ui");
         git_ok(repo, &["checkout", "main"]);
-        dig_ok(repo, &["branch", "feat/platform"]);
+        dgr_ok(repo, &["branch", "feat/platform"]);
         overwrite_file(repo, "shared.txt", "platform\n", "feat: platform change");
         git_ok(repo, &["checkout", "main"]);
 
-        let paused = dig(repo, &["reparent", "feat/auth", "-p", "feat/platform"]);
+        let paused = dgr(repo, &["reparent", "feat/auth", "-p", "feat/platform"]);
         let stderr = String::from_utf8(paused.stderr).unwrap();
 
         assert!(!paused.status.success());
-        assert!(stderr.contains("dig sync --continue"));
+        assert!(stderr.contains("dgr sync --continue"));
         assert_eq!(
             load_operation_json(repo).unwrap()["origin"]["type"].as_str(),
             Some("reparent")
@@ -153,7 +153,7 @@ fn leaves_rebase_open_when_reparent_conflicts_and_sync_continues() {
         std::fs::write(repo.join("shared.txt"), "resolved\n").unwrap();
         git_ok(repo, &["add", "shared.txt"]);
 
-        let resumed = dig_ok(repo, &["sync", "--continue"]);
+        let resumed = dgr_ok(repo, &["sync", "--continue"]);
         let stdout = strip_ansi(&String::from_utf8(resumed.stdout).unwrap());
 
         assert!(stdout.contains("Reparented 'feat/auth' onto 'feat/platform'."));

@@ -11,8 +11,8 @@ pub fn print_trimmed_stderr(output: Option<&str>) {
 
 pub fn print_restack_pause_guidance(output: Option<&str>) {
     print_trimmed_stderr(output);
-    eprintln!("Resolve the rebase conflicts, stage the changes, and run 'dig sync --continue'.");
-    eprintln!("If you abort the rebase, rerun the original dig command from the start.");
+    eprintln!("Resolve the rebase conflicts, stage the changes, and run 'dgr sync --continue'.");
+    eprintln!("If you abort the rebase, rerun the original dgr command from the start.");
 }
 
 pub fn confirm_yes_no(prompt: &str) -> io::Result<bool> {

@@ -5,7 +5,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use support::{
-    active_rebase_head_name, dig, load_operation_json, pause_commit_restack, with_temp_repo,
+    active_rebase_head_name, dgr, load_operation_json, pause_commit_restack, with_temp_repo,
 };
 
 fn assert_command_rejected_while_commit_is_paused(
@@ -15,16 +15,16 @@ fn assert_command_rejected_while_commit_is_paused(
     operation_before: &Value,
 ) {
     let rebase_head_before = active_rebase_head_name(repo);
-    let output = dig(repo, args);
+    let output = dgr(repo, args);
     let stdout = String::from_utf8(output.stdout).unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
     let expected_message = format!(
-        "dig {command_name} cannot run while a dig commit operation is paused; run 'dig sync --continue'"
+        "dgr {command_name} cannot run while a dgr commit operation is paused; run 'dgr sync --continue'"
     );
 
     assert!(
         !output.status.success(),
-        "expected dig {command_name} to fail while commit restack is paused"
+        "expected dgr {command_name} to fail while commit restack is paused"
     );
     assert!(
         stdout.is_empty(),
@@ -56,7 +56,7 @@ fn assert_command_rejected_while_commit_is_paused(
 
 #[test]
 fn commit_rejects_immediately_while_commit_restack_is_paused() {
-    with_temp_repo("dig-pause-guard", |repo| {
+    with_temp_repo("dgr-pause-guard", |repo| {
         let operation = pause_commit_restack(repo);
 
         assert_command_rejected_while_commit_is_paused(
@@ -70,7 +70,7 @@ fn commit_rejects_immediately_while_commit_restack_is_paused() {
 
 #[test]
 fn adopt_rejects_immediately_while_commit_restack_is_paused() {
-    with_temp_repo("dig-pause-guard", |repo| {
+    with_temp_repo("dgr-pause-guard", |repo| {
         let operation = pause_commit_restack(repo);
 
         assert_command_rejected_while_commit_is_paused(
@@ -84,7 +84,7 @@ fn adopt_rejects_immediately_while_commit_restack_is_paused() {
 
 #[test]
 fn merge_rejects_before_rendering_plan_while_commit_restack_is_paused() {
-    with_temp_repo("dig-pause-guard", |repo| {
+    with_temp_repo("dgr-pause-guard", |repo| {
         let operation = pause_commit_restack(repo);
 
         assert_command_rejected_while_commit_is_paused(
@@ -98,7 +98,7 @@ fn merge_rejects_before_rendering_plan_while_commit_restack_is_paused() {
 
 #[test]
 fn clean_rejects_before_rendering_plan_or_prompt_while_commit_restack_is_paused() {
-    with_temp_repo("dig-pause-guard", |repo| {
+    with_temp_repo("dgr-pause-guard", |repo| {
         let operation = pause_commit_restack(repo);
 
         assert_command_rejected_while_commit_is_paused(repo, &["clean"], "clean", &operation);
@@ -107,7 +107,7 @@ fn clean_rejects_before_rendering_plan_or_prompt_while_commit_restack_is_paused(
 
 #[test]
 fn orphan_rejects_immediately_while_commit_restack_is_paused() {
-    with_temp_repo("dig-pause-guard", |repo| {
+    with_temp_repo("dgr-pause-guard", |repo| {
         let operation = pause_commit_restack(repo);
 
         assert_command_rejected_while_commit_is_paused(repo, &["orphan"], "orphan", &operation);
@@ -116,7 +116,7 @@ fn orphan_rejects_immediately_while_commit_restack_is_paused() {
 
 #[test]
 fn reparent_rejects_immediately_while_commit_restack_is_paused() {
-    with_temp_repo("dig-pause-guard", |repo| {
+    with_temp_repo("dgr-pause-guard", |repo| {
         let operation = pause_commit_restack(repo);
 
         assert_command_rejected_while_commit_is_paused(

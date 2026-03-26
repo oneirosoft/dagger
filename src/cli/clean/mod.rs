@@ -141,18 +141,18 @@ pub(crate) fn format_clean_plan(plan: &CleanPlan) -> String {
 fn format_blocked_branch(blocked: &crate::core::clean::BlockedBranch) -> String {
     match &blocked.reason {
         CleanBlockReason::BranchNotTracked => {
-            format!("'{}' is not tracked by dig.", blocked.branch_name)
+            format!("'{}' is not tracked by dagger.", blocked.branch_name)
         }
         CleanBlockReason::BranchMissingLocally => format!(
-            "'{}' is tracked by dig but no longer exists locally.",
+            "'{}' is tracked by dagger but no longer exists locally.",
             blocked.branch_name
         ),
         CleanBlockReason::ParentMissingLocally { parent_branch } => format!(
             "'{}' cannot be cleaned because its parent '{}' does not exist locally.",
             blocked.branch_name, parent_branch
         ),
-        CleanBlockReason::ParentMissingFromDig => format!(
-            "'{}' cannot be cleaned because its tracked parent is missing from dig.",
+        CleanBlockReason::ParentMissingFromDagger => format!(
+            "'{}' cannot be cleaned because its tracked parent is missing from dagger.",
             blocked.branch_name
         ),
         CleanBlockReason::NotIntegrated { parent_branch } => format!(
@@ -280,7 +280,7 @@ pub(crate) fn format_clean_success_output(
         if !lines.is_empty() {
             lines.push(String::new());
         }
-        lines.push("No longer tracked by dig:".to_string());
+        lines.push("No longer tracked by dagger:".to_string());
         for branch_name in &outcome.untracked_branches {
             lines.push(format!("- {branch_name}"));
         }

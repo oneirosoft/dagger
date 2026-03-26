@@ -6,9 +6,9 @@ use uuid::Uuid;
 use crate::core::git;
 use crate::core::graph::BranchGraph;
 use crate::core::graph::BranchLineageNode;
-use crate::core::store::types::DigState;
+use crate::core::store::types::DaggerState;
 use crate::core::store::{
-    BranchDivergenceState, BranchNode, DigConfig, ParentRef, now_unix_timestamp_secs,
+    BranchDivergenceState, BranchNode, DaggerConfig, ParentRef, now_unix_timestamp_secs,
     open_or_initialize, record_branch_created,
 };
 
@@ -47,7 +47,7 @@ pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
     if session.state.find_branch_by_name(branch_name).is_some() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            format!("branch '{branch_name}' is already tracked by dig"),
+            format!("branch '{branch_name}' is already tracked by dagger"),
         ));
     }
 
@@ -126,8 +126,8 @@ fn resolve_parent_branch_name(
 }
 
 pub(crate) fn resolve_parent_ref(
-    state: &DigState,
-    config: &DigConfig,
+    state: &DaggerState,
+    config: &DaggerConfig,
     parent_branch_name: &str,
 ) -> io::Result<ParentRef> {
     if parent_branch_name == config.trunk_branch {
@@ -141,7 +141,7 @@ pub(crate) fn resolve_parent_ref(
             io::Error::new(
                 io::ErrorKind::NotFound,
                 format!(
-                    "parent branch '{}' is not tracked by dig and does not match trunk '{}'",
+                    "parent branch '{}' is not tracked by dagger and does not match trunk '{}'",
                     parent_branch_name, config.trunk_branch
                 ),
             )
@@ -151,8 +151,8 @@ pub(crate) fn resolve_parent_ref(
 #[cfg(test)]
 mod tests {
     use super::{BranchOptions, resolve_parent_branch_name, resolve_parent_ref};
-    use crate::core::store::types::DigState;
-    use crate::core::store::{BranchDivergenceState, BranchNode, DigConfig, ParentRef};
+    use crate::core::store::types::DaggerState;
+    use crate::core::store::{BranchDivergenceState, BranchNode, DaggerConfig, ParentRef};
     use uuid::Uuid;
 
     #[test]
@@ -167,8 +167,8 @@ mod tests {
 
     #[test]
     fn resolves_requested_trunk_parent() {
-        let state = DigState::default();
-        let config = DigConfig::new("main".into());
+        let state = DaggerState::default();
+        let config = DaggerConfig::new("main".into());
 
         assert_eq!(
             resolve_parent_ref(&state, &config, "main").unwrap(),
@@ -179,8 +179,8 @@ mod tests {
     #[test]
     fn resolves_requested_tracked_parent_branch() {
         let parent_id = Uuid::new_v4();
-        let state = DigState {
-            version: crate::core::store::types::DIG_STATE_VERSION,
+        let state = DaggerState {
+            version: crate::core::store::types::DAGGER_STATE_VERSION,
             nodes: vec![BranchNode {
                 id: parent_id,
                 branch_name: "feature/base".into(),
@@ -194,7 +194,7 @@ mod tests {
                 archived: false,
             }],
         };
-        let config = DigConfig::new("main".into());
+        let config = DaggerConfig::new("main".into());
 
         assert_eq!(
             resolve_parent_ref(&state, &config, "feature/base").unwrap(),

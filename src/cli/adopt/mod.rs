@@ -13,7 +13,7 @@ pub struct AdoptArgs {
     /// The existing local branch to adopt under the provided parent
     pub branch_name: Option<String>,
 
-    /// The tracked dig parent branch to adopt under
+    /// The tracked dagger parent branch to adopt under
     #[arg(short = 'p', long = "parent", value_name = "BRANCH")]
     pub parent_branch_name: String,
 }

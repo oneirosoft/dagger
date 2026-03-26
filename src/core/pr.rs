@@ -92,19 +92,19 @@ enum PrTrackingAction {
 }
 
 pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     workflow::ensure_no_pending_operation(&session.paths, "pr")?;
     git::ensure_no_in_progress_operations(&session.repo, "pr")?;
 
     let branch_name = git::current_branch_name_if_any()?.ok_or_else(|| {
-        io::Error::other("dig pr requires a named branch; detached HEAD is not supported")
+        io::Error::other("dgr pr requires a named branch; detached HEAD is not supported")
     })?;
     let node = session
         .state
         .find_branch_by_name(&branch_name)
         .cloned()
         .ok_or_else(|| {
-            io::Error::other(format!("branch '{}' is not tracked by dig", branch_name))
+            io::Error::other(format!("branch '{}' is not tracked by dagger", branch_name))
         })?;
 
     let base_branch_name = BranchGraph::new(&session.state)
@@ -177,7 +177,7 @@ pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
                 base_branch_name,
                 pull_request,
                 created_pull_request_url: created_pull_request
-                    .display_url_in_dig
+                    .display_url_in_dagger
                     .then_some(created_pull_request.url),
             })
         }
@@ -207,18 +207,18 @@ pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
 }
 
 pub fn current_branch_push_target_for_create() -> io::Result<Option<git::BranchPushTarget>> {
-    let session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     workflow::ensure_no_pending_operation(&session.paths, "pr")?;
     git::ensure_no_in_progress_operations(&session.repo, "pr")?;
 
     let branch_name = git::current_branch_name_if_any()?.ok_or_else(|| {
-        io::Error::other("dig pr requires a named branch; detached HEAD is not supported")
+        io::Error::other("dgr pr requires a named branch; detached HEAD is not supported")
     })?;
     let node = session
         .state
         .find_branch_by_name(&branch_name)
         .ok_or_else(|| {
-            io::Error::other(format!("branch '{}' is not tracked by dig", branch_name))
+            io::Error::other(format!("branch '{}' is not tracked by dagger", branch_name))
         })?;
 
     if node.pull_request.is_some() {
@@ -242,19 +242,19 @@ pub fn current_branch_push_target_for_create() -> io::Result<Option<git::BranchP
 }
 
 pub fn merge_current_pull_request() -> io::Result<PrMergeOutcome> {
-    let session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     workflow::ensure_no_pending_operation(&session.paths, "pr")?;
     git::ensure_no_in_progress_operations(&session.repo, "pr")?;
 
     let branch_name = git::current_branch_name_if_any()?.ok_or_else(|| {
-        io::Error::other("dig pr requires a named branch; detached HEAD is not supported")
+        io::Error::other("dgr pr requires a named branch; detached HEAD is not supported")
     })?;
     let node = session
         .state
         .find_branch_by_name(&branch_name)
         .cloned()
         .ok_or_else(|| {
-            io::Error::other(format!("branch '{}' is not tracked by dig", branch_name))
+            io::Error::other(format!("branch '{}' is not tracked by dagger", branch_name))
         })?;
     let pull_request = node.pull_request.clone().ok_or_else(|| {
         io::Error::other(format!(
@@ -309,7 +309,7 @@ pub fn merge_current_pull_request() -> io::Result<PrMergeOutcome> {
 }
 
 pub fn list_open_tracked_pull_requests() -> io::Result<PrListOutcome> {
-    open_initialized("dig is not initialized; run 'dig init' first")?;
+    open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let open_pull_requests = gh::list_open_pull_requests()?;
     let pull_request_lookup = open_pull_requests
         .into_iter()
@@ -336,9 +336,9 @@ pub fn list_open_tracked_pull_requests() -> io::Result<PrListOutcome> {
 }
 
 pub fn open_current_pull_request_in_browser() -> io::Result<()> {
-    let session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let branch_name = git::current_branch_name_if_any()?.ok_or_else(|| {
-        io::Error::other("dig pr requires a named branch; detached HEAD is not supported")
+        io::Error::other("dgr pr requires a named branch; detached HEAD is not supported")
     })?;
 
     if let Some(pull_request) = session
@@ -375,11 +375,11 @@ fn resolve_tracking_action(
             Ok(PrTrackingAction::Adopt(pull_request.clone()))
         }
         [pull_request] => Err(io::Error::other(format!(
-            "branch '{}' already has open pull request #{} into '{}', but dig expects base '{}'",
+            "branch '{}' already has open pull request #{} into '{}', but dagger expects base '{}'",
             branch_name, pull_request.number, pull_request.base_ref_name, base_branch_name
         ))),
         _ => Err(io::Error::other(format!(
-            "branch '{}' has multiple open pull requests on GitHub; dig pr cannot choose automatically",
+            "branch '{}' has multiple open pull requests on GitHub; dgr pr cannot choose automatically",
             branch_name
         ))),
     }
@@ -466,7 +466,7 @@ mod tests {
             &[PullRequestSummary {
                 number: 123,
                 base_ref_name: "main".into(),
-                url: "https://github.com/acme/dig/pull/123".into(),
+                url: "https://github.com/oneirosoft/dagger/pull/123".into(),
             }],
         )
         .unwrap();
@@ -476,7 +476,7 @@ mod tests {
             PrTrackingAction::Adopt(PullRequestSummary {
                 number: 123,
                 base_ref_name: "main".into(),
-                url: "https://github.com/acme/dig/pull/123".into(),
+                url: "https://github.com/oneirosoft/dagger/pull/123".into(),
             })
         );
     }
@@ -489,7 +489,7 @@ mod tests {
             &[PullRequestSummary {
                 number: 123,
                 base_ref_name: "develop".into(),
-                url: "https://github.com/acme/dig/pull/123".into(),
+                url: "https://github.com/oneirosoft/dagger/pull/123".into(),
             }],
         )
         .unwrap_err();
@@ -506,12 +506,12 @@ mod tests {
                 PullRequestSummary {
                     number: 123,
                     base_ref_name: "main".into(),
-                    url: "https://github.com/acme/dig/pull/123".into(),
+                    url: "https://github.com/oneirosoft/dagger/pull/123".into(),
                 },
                 PullRequestSummary {
                     number: 124,
                     base_ref_name: "main".into(),
-                    url: "https://github.com/acme/dig/pull/124".into(),
+                    url: "https://github.com/oneirosoft/dagger/pull/124".into(),
                 },
             ],
         )
@@ -539,7 +539,7 @@ mod tests {
                 PullRequestDetails {
                     number: 123,
                     title: "Auth UI".into(),
-                    url: "https://github.com/acme/dig/pull/123".into(),
+                    url: "https://github.com/oneirosoft/dagger/pull/123".into(),
                 },
             )]),
         );
@@ -550,7 +550,7 @@ mod tests {
                 pull_request: PullRequestDetails {
                     number: 123,
                     title: "Auth UI".into(),
-                    url: "https://github.com/acme/dig/pull/123".into(),
+                    url: "https://github.com/oneirosoft/dagger/pull/123".into(),
                 },
                 children: vec![],
             }]
@@ -565,13 +565,13 @@ mod tests {
                 pull_request: PullRequestDetails {
                     number: 123,
                     title: "Auth".into(),
-                    url: "https://github.com/acme/dig/pull/123".into(),
+                    url: "https://github.com/oneirosoft/dagger/pull/123".into(),
                 },
                 children: vec![TrackedPullRequestListNode {
                     pull_request: PullRequestDetails {
                         number: 124,
                         title: "Auth UI".into(),
-                        url: "https://github.com/acme/dig/pull/124".into(),
+                        url: "https://github.com/oneirosoft/dagger/pull/124".into(),
                     },
                     children: vec![],
                 }],

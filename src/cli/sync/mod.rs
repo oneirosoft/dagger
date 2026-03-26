@@ -456,7 +456,7 @@ fn format_full_sync_summary(outcome: &sync::FullSyncOutcome) -> String {
     }
 
     if !outcome.deleted_branches.is_empty() {
-        let mut lines = vec!["Deleted locally and no longer tracked by dig:".to_string()];
+        let mut lines = vec!["Deleted locally and no longer tracked by dagger:".to_string()];
         for branch_name in &outcome.deleted_branches {
             lines.push(format!("- {branch_name}"));
         }

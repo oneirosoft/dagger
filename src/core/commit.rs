@@ -5,7 +5,7 @@ use crate::core::git::{self, RepoContext};
 use crate::core::restack::{self, RestackPreview};
 use crate::core::store::{
     BranchDivergenceState, PendingCommitEntry, PendingCommitOperation, PendingOperationKind,
-    PendingOperationState, StoreSession, dig_paths, load_config, load_state, open_initialized,
+    PendingOperationState, StoreSession, dagger_paths, load_config, load_state, open_initialized,
     record_branch_divergence_state,
 };
 use crate::core::workflow;
@@ -290,7 +290,7 @@ fn maybe_restack_after_commit_inner(
         return Ok(PostCommitRestackOutcome::default());
     };
 
-    let store_paths = dig_paths(&context.repo.git_dir);
+    let store_paths = dagger_paths(&context.repo.git_dir);
     let Some(config) = load_config(&store_paths)? else {
         return Ok(PostCommitRestackOutcome::default());
     };
@@ -373,7 +373,7 @@ pub(crate) fn resume_after_sync(
     pending_operation: PendingOperationState,
     payload: PendingCommitOperation,
 ) -> io::Result<CommitOutcome> {
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let restack_outcome = workflow::continue_resumable_restack_operation(
         &mut session,
         pending_operation,

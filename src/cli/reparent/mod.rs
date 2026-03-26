@@ -10,10 +10,10 @@ use super::common;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct ReparentArgs {
-    /// The tracked branch to reparent in dig
+    /// The tracked branch to reparent in dagger
     pub branch_name: Option<String>,
 
-    /// The new tracked dig parent branch
+    /// The new tracked dagger parent branch
     #[arg(short = 'p', long = "parent", value_name = "BRANCH")]
     pub parent_branch_name: String,
 }

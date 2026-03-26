@@ -1,12 +1,12 @@
 use std::fs;
 use std::io;
 
-use super::fs::{DigPaths, ensure_store_dir, write_atomic};
-use super::types::DigState;
+use super::fs::{DaggerPaths, ensure_store_dir, write_atomic};
+use super::types::DaggerState;
 
-pub fn load_state(paths: &DigPaths) -> io::Result<DigState> {
+pub fn load_state(paths: &DaggerPaths) -> io::Result<DaggerState> {
     if !paths.state_file.exists() {
-        return Ok(DigState::default());
+        return Ok(DaggerState::default());
     }
 
     let bytes = fs::read(&paths.state_file)?;
@@ -16,7 +16,7 @@ pub fn load_state(paths: &DigPaths) -> io::Result<DigState> {
     Ok(state)
 }
 
-pub fn save_state(paths: &DigPaths, state: &DigState) -> io::Result<()> {
+pub fn save_state(paths: &DaggerPaths, state: &DaggerState) -> io::Result<()> {
     ensure_store_dir(paths)?;
 
     let bytes = serde_json::to_vec_pretty(state)

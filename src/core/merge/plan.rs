@@ -3,7 +3,7 @@ use std::io;
 use crate::core::git;
 use crate::core::graph::BranchGraph;
 use crate::core::restack;
-use crate::core::store::{dig_paths, load_config, load_state};
+use crate::core::store::{dagger_paths, load_config, load_state};
 use crate::core::workflow;
 
 use super::types::{MergeMode, MergeOptions, MergePlan};
@@ -34,16 +34,16 @@ pub(crate) fn plan(options: &MergeOptions) -> io::Result<MergePlan> {
     }
 
     let repo = git::resolve_repo_context()?;
-    let store_paths = dig_paths(&repo.git_dir);
+    let store_paths = dagger_paths(&repo.git_dir);
     let config = load_config(&store_paths)?
-        .ok_or_else(|| io::Error::other("dig is not initialized; run 'dig init' first"))?;
+        .ok_or_else(|| io::Error::other("dagger is not initialized; run 'dgr init' first"))?;
     let state = load_state(&store_paths)?;
     let current_branch = git::current_branch_name()?;
 
     let node = state.find_branch_by_name(branch_name).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            format!("'{}' is not tracked by dig", branch_name),
+            format!("'{}' is not tracked by dagger", branch_name),
         )
     })?;
 
@@ -62,7 +62,7 @@ pub(crate) fn plan(options: &MergeOptions) -> io::Result<MergePlan> {
         .parent_branch_name(node, &config.trunk_branch)
         .ok_or_else(|| {
             io::Error::other(format!(
-                "tracked parent for '{}' is missing from dig",
+                "tracked parent for '{}' is missing from dagger",
                 node.branch_name
             ))
         })?;

@@ -35,7 +35,7 @@ pub struct PrArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum PrCommand {
-    /// List open pull requests that are tracked by dig
+    /// List open pull requests that are tracked by dagger
     List(PrListArgs),
 
     /// Merge the current tracked pull request on GitHub
@@ -281,13 +281,13 @@ mod tests {
                 pull_request: crate::core::gh::PullRequestDetails {
                     number: 123,
                     title: "Auth".into(),
-                    url: "https://github.com/acme/dig/pull/123".into(),
+                    url: "https://github.com/oneirosoft/dagger/pull/123".into(),
                 },
                 children: vec![TrackedPullRequestListNode {
                     pull_request: crate::core::gh::PullRequestDetails {
                         number: 124,
                         title: "Auth UI".into(),
-                        url: "https://github.com/acme/dig/pull/124".into(),
+                        url: "https://github.com/oneirosoft/dagger/pull/124".into(),
                     },
                     children: vec![],
                 }],
@@ -298,8 +298,8 @@ mod tests {
             rendered,
             concat!(
                 "main\n",
-                "└── #123: Auth - https://github.com/acme/dig/pull/123\n",
-                "    └── #124: Auth UI - https://github.com/acme/dig/pull/124"
+                "└── #123: Auth - https://github.com/oneirosoft/dagger/pull/123\n",
+                "    └── #124: Auth UI - https://github.com/oneirosoft/dagger/pull/124"
             )
         );
     }

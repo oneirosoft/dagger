@@ -6,41 +6,41 @@ use uuid::Uuid;
 
 use crate::core::restack::{RestackAction, RestackBaseTarget, RestackPreview};
 
-pub const DIG_STATE_VERSION: u32 = 1;
-pub const DIG_CONFIG_VERSION: u32 = 1;
-pub const DIG_OPERATION_VERSION: u32 = 1;
+pub const DAGGER_STATE_VERSION: u32 = 1;
+pub const DAGGER_CONFIG_VERSION: u32 = 1;
+pub const DAGGER_OPERATION_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DigConfig {
+pub struct DaggerConfig {
     pub version: u32,
     pub trunk_branch: String,
 }
 
-impl DigConfig {
+impl DaggerConfig {
     pub fn new(trunk_branch: String) -> Self {
         Self {
-            version: DIG_CONFIG_VERSION,
+            version: DAGGER_CONFIG_VERSION,
             trunk_branch,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DigState {
+pub struct DaggerState {
     pub version: u32,
     pub nodes: Vec<BranchNode>,
 }
 
-impl Default for DigState {
+impl Default for DaggerState {
     fn default() -> Self {
         Self {
-            version: DIG_STATE_VERSION,
+            version: DAGGER_STATE_VERSION,
             nodes: Vec::new(),
         }
     }
 }
 
-impl DigState {
+impl DaggerState {
     pub fn find_branch_by_name(&self, branch_name: &str) -> Option<&BranchNode> {
         self.nodes
             .iter()
@@ -67,7 +67,7 @@ impl DigState {
         if self.find_branch_by_name(&node.branch_name).is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
-                format!("branch '{}' is already tracked by dig", node.branch_name),
+                format!("branch '{}' is already tracked by dagger", node.branch_name),
             ));
         }
 
@@ -149,7 +149,7 @@ impl PendingOperationState {
         let active_action = actions.next()?;
 
         Some(Self {
-            version: DIG_OPERATION_VERSION,
+            version: DAGGER_OPERATION_VERSION,
             origin,
             restack: PendingRestackState {
                 active_action,
@@ -348,7 +348,7 @@ pub enum ParentRef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum DigEvent {
+pub enum DaggerEvent {
     BranchCreated(BranchCreatedEvent),
     BranchAdopted(BranchAdoptedEvent),
     BranchArchived(BranchArchivedEvent),
@@ -422,8 +422,8 @@ pub fn now_unix_timestamp_secs() -> u64 {
 mod tests {
     use super::{
         BranchAdoptedEvent, BranchArchiveReason, BranchArchivedEvent, BranchDivergenceState,
-        BranchNode, BranchPullRequestTrackedEvent, BranchPullRequestTrackedSource, DigConfig,
-        DigEvent, DigState, ParentRef, PendingCommitOperation, PendingOperationKind,
+        BranchNode, BranchPullRequestTrackedEvent, BranchPullRequestTrackedSource, DaggerConfig,
+        DaggerEvent, DaggerState, ParentRef, PendingCommitOperation, PendingOperationKind,
         PendingOperationState, PendingOrphanOperation, PendingReparentOperation,
         PendingSyncOperation, PendingSyncPhase, TrackedPullRequest,
     };
@@ -445,7 +445,7 @@ mod tests {
             archived: false,
         };
 
-        let mut state = DigState::default();
+        let mut state = DaggerState::default();
         state.insert_branch(node.clone()).unwrap();
 
         assert_eq!(state.find_branch_by_name("feature/api"), Some(&node));
@@ -453,12 +453,12 @@ mod tests {
 
     #[test]
     fn builds_config_with_trunk_branch() {
-        assert_eq!(DigConfig::new("main".into()).trunk_branch, "main");
+        assert_eq!(DaggerConfig::new("main".into()).trunk_branch, "main");
     }
 
     #[test]
     fn serializes_branch_archive_event_with_union_reason() {
-        let event = DigEvent::BranchArchived(BranchArchivedEvent {
+        let event = DaggerEvent::BranchArchived(BranchArchivedEvent {
             occurred_at_unix_secs: 1,
             branch_id: Uuid::nil(),
             branch_name: "feature/api".into(),
@@ -475,7 +475,7 @@ mod tests {
 
     #[test]
     fn serializes_orphaned_branch_archive_event() {
-        let event = DigEvent::BranchArchived(BranchArchivedEvent {
+        let event = DaggerEvent::BranchArchived(BranchArchivedEvent {
             occurred_at_unix_secs: 1,
             branch_id: Uuid::nil(),
             branch_name: "feature/api".into(),
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn serializes_branch_adopted_event() {
-        let event = DigEvent::BranchAdopted(BranchAdoptedEvent {
+        let event = DaggerEvent::BranchAdopted(BranchAdoptedEvent {
             occurred_at_unix_secs: 1,
             node: BranchNode {
                 id: Uuid::nil(),
@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn serializes_branch_pull_request_tracked_event() {
-        let event = DigEvent::BranchPullRequestTracked(BranchPullRequestTrackedEvent {
+        let event = DaggerEvent::BranchPullRequestTracked(BranchPullRequestTrackedEvent {
             occurred_at_unix_secs: 1,
             branch_id: Uuid::nil(),
             branch_name: "feature/api".into(),
@@ -654,7 +654,7 @@ mod tests {
 
     #[test]
     fn serializes_deleted_locally_branch_archive_event() {
-        let event = DigEvent::BranchArchived(BranchArchivedEvent {
+        let event = DaggerEvent::BranchArchived(BranchArchivedEvent {
             occurred_at_unix_secs: 1,
             branch_id: Uuid::nil(),
             branch_name: "feature/api".into(),

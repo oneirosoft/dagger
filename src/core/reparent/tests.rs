@@ -2,14 +2,14 @@ use std::io;
 
 use super::{ReparentOptions, apply, plan};
 use crate::core::git;
-use crate::core::store::{ParentRef, dig_paths, load_state};
+use crate::core::store::{ParentRef, dagger_paths, load_state};
 use crate::core::test_support::{
     commit_file, create_tracked_branch, git_ok, initialize_main_repo, with_temp_repo,
 };
 
 #[test]
 fn defaults_to_current_branch_when_name_is_omitted() {
-    with_temp_repo("dig-reparent", |repo| {
+    with_temp_repo("dgr-reparent", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         create_tracked_branch("feat/auth-ui");
@@ -27,7 +27,7 @@ fn defaults_to_current_branch_when_name_is_omitted() {
 
 #[test]
 fn rejects_reparenting_to_current_parent() {
-    with_temp_repo("dig-reparent", |repo| {
+    with_temp_repo("dgr-reparent", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         create_tracked_branch("feat/auth-ui");
@@ -48,7 +48,7 @@ fn rejects_reparenting_to_current_parent() {
 
 #[test]
 fn rejects_reparenting_onto_descendant() {
-    with_temp_repo("dig-reparent", |repo| {
+    with_temp_repo("dgr-reparent", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         create_tracked_branch("feat/auth-api");
@@ -70,7 +70,7 @@ fn rejects_reparenting_onto_descendant() {
 
 #[test]
 fn reparents_tracked_branch_and_restacks_descendants() {
-    with_temp_repo("dig-reparent", |repo| {
+    with_temp_repo("dgr-reparent", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -104,7 +104,7 @@ fn reparents_tracked_branch_and_restacks_descendants() {
         assert_eq!(git::current_branch_name().unwrap(), "main");
 
         let repo_context = git::resolve_repo_context().unwrap();
-        let state = load_state(&dig_paths(&repo_context.git_dir)).unwrap();
+        let state = load_state(&dagger_paths(&repo_context.git_dir)).unwrap();
         let auth = state.find_branch_by_name("feat/auth").unwrap();
         let platform = state.find_branch_by_name("feat/platform").unwrap();
         let ui = state.find_branch_by_name("feat/auth-ui").unwrap();

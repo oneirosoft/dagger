@@ -3,7 +3,7 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use support::{
-    dig_ok, dig_ok_with_env, find_node, initialize_main_repo, install_fake_executable,
+    dgr_ok, dgr_ok_with_env, find_node, initialize_main_repo, install_fake_executable,
     load_state_json, path_with_prepend, strip_ansi, with_temp_repo,
 };
 
@@ -18,11 +18,11 @@ fn install_fake_gh(repo: &Path, script: &str) -> (PathBuf, String) {
 
 #[test]
 fn branch_command_renders_marked_lineage_and_tracks_parent() {
-    with_temp_repo("dig-branch-cli", |repo| {
+    with_temp_repo("dgr-branch-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
+        dgr_ok(repo, &["init"]);
 
-        let output = dig_ok(repo, &["branch", "feat/auth"]);
+        let output = dgr_ok(repo, &["branch", "feat/auth"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("Created and switched to 'feat/auth'."));
@@ -37,26 +37,26 @@ fn branch_command_renders_marked_lineage_and_tracks_parent() {
 
 #[test]
 fn init_reuses_marked_lineage_output_for_current_branch() {
-    with_temp_repo("dig-branch-cli", |repo| {
+    with_temp_repo("dgr-branch-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
-        let output = dig_ok(repo, &["init"]);
+        let output = dgr_ok(repo, &["init"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("Using existing Git repository."));
-        assert!(stdout.contains("Dig is already initialized."));
+        assert!(stdout.contains("Dagger is already initialized."));
         assert!(stdout.contains("✓ feat/auth\n│ \n*  main"));
     });
 }
 
 #[test]
 fn init_lineage_shows_tracked_pull_request_numbers() {
-    with_temp_repo("dig-branch-cli", |repo| {
+    with_temp_repo("dgr-branch-cli", |repo| {
         initialize_main_repo(repo);
-        dig_ok(repo, &["init"]);
-        dig_ok(repo, &["branch", "feat/auth"]);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
 
         let (_, path) = install_fake_gh(
             repo,
@@ -67,7 +67,7 @@ if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  printf 'https://github.com/acme/dig/pull/123\n'
+  printf 'https://github.com/oneirosoft/dagger/pull/123\n'
   exit 0
 fi
 echo "unexpected gh args: $*" >&2
@@ -75,9 +75,9 @@ exit 1
 "#,
         );
 
-        dig_ok_with_env(repo, &["pr"], &[("PATH", path.as_str())]);
+        dgr_ok_with_env(repo, &["pr"], &[("PATH", path.as_str())]);
 
-        let output = dig_ok(repo, &["init"]);
+        let output = dgr_ok(repo, &["init"]);
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
 
         assert!(stdout.contains("✓ feat/auth (#123)\n│ \n*  main"));

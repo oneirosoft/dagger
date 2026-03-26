@@ -36,7 +36,7 @@ where
         });
     }
 
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     workflow::ensure_ready_for_operation(&session.repo, "clean")?;
     workflow::ensure_no_pending_operation(&session.paths, "clean")?;
     let current_branch = git::current_branch_name()?;
@@ -158,7 +158,7 @@ where
     F: FnMut(CleanEvent) -> io::Result<()>,
 {
     let mut untracked_branches = payload.untracked_branches;
-    let mut session = open_initialized("dig is not initialized; run 'dig init' first")?;
+    let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     let mut deleted_branches = payload.deleted_branches;
     let mut restacked_branches = payload.restacked_branches;
 
@@ -471,7 +471,7 @@ where
         BranchGraph::new(&session.state).parent_branch_name(&node, &session.config.trunk_branch)
     else {
         return Err(io::Error::other(format!(
-            "tracked parent for '{}' is missing from dig",
+            "tracked parent for '{}' is missing from dagger",
             node.branch_name
         )));
     };

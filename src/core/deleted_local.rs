@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::core::git;
 use crate::core::graph::{BranchGraph, BranchTreeNode};
 use crate::core::restack::{self, RestackAction, RestackBaseTarget, RestackPreview};
-use crate::core::store::types::DigState;
+use crate::core::store::types::DaggerState;
 use crate::core::store::{BranchArchiveReason, ParentRef, StoreSession, record_branch_archived};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,14 +26,14 @@ enum DeletedLocalScope {
 }
 
 pub(crate) fn collect_deleted_local_steps(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
 ) -> io::Result<Vec<DeletedLocalBranchStep>> {
     collect_deleted_local_steps_with_scope(state, trunk_branch, DeletedLocalScope::All)
 }
 
 pub(crate) fn collect_deleted_local_subtree_steps(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     root_node_id: Uuid,
 ) -> io::Result<Vec<DeletedLocalBranchStep>> {
@@ -45,14 +45,14 @@ pub(crate) fn collect_deleted_local_subtree_steps(
 }
 
 pub(crate) fn next_deleted_local_step(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
 ) -> io::Result<Option<DeletedLocalBranchStep>> {
     next_deleted_local_step_with_scope(state, trunk_branch, DeletedLocalScope::All)
 }
 
 pub(crate) fn restack_actions_for_step(
-    state: &DigState,
+    state: &DaggerState,
     step: &DeletedLocalBranchStep,
 ) -> io::Result<Vec<RestackAction>> {
     restack::plan_after_deleted_branch(
@@ -65,7 +65,7 @@ pub(crate) fn restack_actions_for_step(
 }
 
 pub(crate) fn simulate_deleted_local_step(
-    state: &mut DigState,
+    state: &mut DaggerState,
     step: &DeletedLocalBranchStep,
 ) -> io::Result<()> {
     for action in restack_actions_for_step(state, step)? {
@@ -88,7 +88,7 @@ pub(crate) fn archive_deleted_local_step(
 }
 
 fn collect_deleted_local_steps_with_scope(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     scope: DeletedLocalScope,
 ) -> io::Result<Vec<DeletedLocalBranchStep>> {
@@ -106,7 +106,7 @@ fn collect_deleted_local_steps_with_scope(
 }
 
 fn next_deleted_local_step_with_scope(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     scope: DeletedLocalScope,
 ) -> io::Result<Option<DeletedLocalBranchStep>> {
@@ -136,7 +136,7 @@ fn next_deleted_local_step_with_scope(
     plan_deleted_local_step(state, trunk_branch, node_id).map(Some)
 }
 
-fn scoped_node_ids(state: &DigState, scope: DeletedLocalScope) -> Vec<Uuid> {
+fn scoped_node_ids(state: &DaggerState, scope: DeletedLocalScope) -> Vec<Uuid> {
     match scope {
         DeletedLocalScope::All => state
             .nodes
@@ -156,7 +156,7 @@ fn scoped_node_ids(state: &DigState, scope: DeletedLocalScope) -> Vec<Uuid> {
 }
 
 fn plan_deleted_local_step(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     node_id: Uuid,
 ) -> io::Result<DeletedLocalBranchStep> {
@@ -187,7 +187,7 @@ fn plan_deleted_local_step(
 }
 
 pub(crate) fn plan_deleted_local_step_for_branch(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     branch_name: &str,
 ) -> io::Result<DeletedLocalBranchStep> {
@@ -202,7 +202,7 @@ pub(crate) fn plan_deleted_local_step_for_branch(
 }
 
 pub(crate) fn resolve_replacement_parent(
-    state: &DigState,
+    state: &DaggerState,
     trunk_branch: &str,
     parent: &ParentRef,
 ) -> io::Result<(RestackBaseTarget, ParentRef)> {

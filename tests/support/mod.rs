@@ -29,8 +29,8 @@ pub fn with_temp_repo(prefix: &str, test: impl FnOnce(&Path)) {
 pub fn initialize_main_repo(repo: &Path) {
     git_ok(repo, &["init", "--quiet"]);
     git_ok(repo, &["checkout", "-b", "main"]);
-    git_ok(repo, &["config", "user.name", "Dig Test"]);
-    git_ok(repo, &["config", "user.email", "dig@example.com"]);
+    git_ok(repo, &["config", "user.name", "Dagger Test"]);
+    git_ok(repo, &["config", "user.email", "dagger@example.com"]);
     git_ok(repo, &["config", "commit.gpgsign", "false"]);
     commit_file(repo, "README.md", "root\n", "chore: init");
 }
@@ -78,12 +78,12 @@ pub fn write_file(repo: &Path, file_name: &str, contents: &str) {
     fs::write(repo.join(file_name), contents).unwrap();
 }
 
-pub fn dig(repo: &Path, args: &[&str]) -> Output {
-    dig_with_env(repo, args, &[])
+pub fn dgr(repo: &Path, args: &[&str]) -> Output {
+    dgr_with_env(repo, args, &[])
 }
 
-pub fn dig_with_env(repo: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_dig"))
+pub fn dgr_with_env(repo: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_dgr"))
         .current_dir(repo)
         .args(args)
         .envs(envs.iter().copied())
@@ -91,17 +91,17 @@ pub fn dig_with_env(repo: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output
         .unwrap()
 }
 
-pub fn dig_with_input(repo: &Path, args: &[&str], input: &str) -> Output {
-    dig_with_input_and_env(repo, args, input, &[])
+pub fn dgr_with_input(repo: &Path, args: &[&str], input: &str) -> Output {
+    dgr_with_input_and_env(repo, args, input, &[])
 }
 
-pub fn dig_with_input_and_env(
+pub fn dgr_with_input_and_env(
     repo: &Path,
     args: &[&str],
     input: &str,
     envs: &[(&str, &str)],
 ) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_dig"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dgr"))
         .current_dir(repo)
         .args(args)
         .envs(envs.iter().copied())
@@ -121,15 +121,15 @@ pub fn dig_with_input_and_env(
     child.wait_with_output().unwrap()
 }
 
-pub fn dig_ok(repo: &Path, args: &[&str]) -> Output {
-    dig_ok_with_env(repo, args, &[])
+pub fn dgr_ok(repo: &Path, args: &[&str]) -> Output {
+    dgr_ok_with_env(repo, args, &[])
 }
 
-pub fn dig_ok_with_env(repo: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let output = dig_with_env(repo, args, envs);
+pub fn dgr_ok_with_env(repo: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
+    let output = dgr_with_env(repo, args, envs);
     assert!(
         output.status.success(),
-        "dig {:?} failed\nstdout:\n{}\nstderr:\n{}",
+        "dgr {:?} failed\nstdout:\n{}\nstderr:\n{}",
         args,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
@@ -188,11 +188,12 @@ pub fn git_binary_path() -> String {
 }
 
 pub fn load_state_json(repo: &Path) -> Value {
-    serde_json::from_str(&fs::read_to_string(repo.join(".git/dig/state.json")).unwrap()).unwrap()
+    serde_json::from_str(&fs::read_to_string(repo.join(".git/.dagger/state.json")).unwrap())
+        .unwrap()
 }
 
 pub fn load_operation_json(repo: &Path) -> Option<Value> {
-    let path = repo.join(".git/dig/operation.json");
+    let path = repo.join(".git/.dagger/operation.json");
     if !path.exists() {
         return None;
     }
@@ -219,7 +220,7 @@ pub fn find_archived_node<'a>(state: &'a Value, branch_name: &str) -> Option<&'a
 }
 
 pub fn load_events_json(repo: &Path) -> Vec<Value> {
-    fs::read_to_string(repo.join(".git/dig/events.ndjson"))
+    fs::read_to_string(repo.join(".git/.dagger/events.ndjson"))
         .unwrap()
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -228,7 +229,7 @@ pub fn load_events_json(repo: &Path) -> Vec<Value> {
 }
 
 pub fn events_contain_type(repo: &Path, event_type: &str) -> bool {
-    fs::read_to_string(repo.join(".git/dig/events.ndjson"))
+    fs::read_to_string(repo.join(".git/.dagger/events.ndjson"))
         .unwrap()
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -275,10 +276,10 @@ pub fn active_rebase_head_name(repo: &Path) -> String {
 
 pub fn pause_commit_restack(repo: &Path) -> Value {
     initialize_main_repo(repo);
-    dig_ok(repo, &["init"]);
-    dig_ok(repo, &["branch", "feat/auth"]);
+    dgr_ok(repo, &["init"]);
+    dgr_ok(repo, &["branch", "feat/auth"]);
     commit_file(repo, "shared.txt", "base\n", "feat: auth");
-    dig_ok(repo, &["branch", "feat/auth-ui"]);
+    dgr_ok(repo, &["branch", "feat/auth-ui"]);
     write_file(repo, "shared.txt", "child\n");
     git_ok(repo, &["add", "shared.txt"]);
     git_ok(
@@ -296,7 +297,7 @@ pub fn pause_commit_restack(repo: &Path) -> Value {
     write_file(repo, "shared.txt", "parent\n");
     git_ok(repo, &["add", "shared.txt"]);
 
-    let output = dig(repo, &["commit", "-m", "feat: parent follow-up"]);
+    let output = dgr(repo, &["commit", "-m", "feat: parent follow-up"]);
     assert!(
         !output.status.success(),
         "expected paused commit restack setup to fail\nstdout:\n{}\nstderr:\n{}",
@@ -308,7 +309,7 @@ pub fn pause_commit_restack(repo: &Path) -> Value {
         "expected git rebase state to remain active after paused commit restack"
     );
 
-    let operation = load_operation_json(repo).expect("expected pending dig operation");
+    let operation = load_operation_json(repo).expect("expected pending dagger operation");
     assert_eq!(operation["origin"]["type"].as_str(), Some("commit"));
     assert!(
         active_rebase_head_name(repo).contains("feat/auth-ui"),

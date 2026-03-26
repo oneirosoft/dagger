@@ -90,12 +90,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="dig-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
+          archive="dagger-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
           package_dir="dist/package"
           mkdir -p "$package_dir"
-          cp "target/${{ matrix.target }}/release/dig" "$package_dir/dig"
+          cp "target/${{ matrix.target }}/release/dgr" "$package_dir/dgr"
           cp README.md "$package_dir/README.md"
-          tar -C "$package_dir" -czf "dist/$archive" dig README.md
+          tar -C "$package_dir" -czf "dist/$archive" dgr README.md
 
       - name: Package release archive on Windows
         if: runner.os == 'Windows'
@@ -103,16 +103,16 @@ jobs:
         run: |
           $packageDir = Join-Path "dist" "package"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/dig.exe" (Join-Path $packageDir "dig.exe")
+          Copy-Item "target/${{ matrix.target }}/release/dgr.exe" (Join-Path $packageDir "dgr.exe")
           Copy-Item "README.md" (Join-Path $packageDir "README.md")
-          $archive = Join-Path "dist" "dig-$env:GITHUB_REF_NAME-${{ matrix.target }}.zip"
+          $archive = Join-Path "dist" "dagger-$env:GITHUB_REF_NAME-${{ matrix.target }}.zip"
           Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $archive -Force
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v6
         with:
           name: release-${{ matrix.target }}
-          path: dist/dig-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive_ext }}
+          path: dist/dagger-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive_ext }}
           if-no-files-found: error
 
   publish:
@@ -135,7 +135,7 @@ jobs:
           set -euo pipefail
           cd release-artifacts
           shopt -s nullglob
-          files=(dig-*)
+          files=(dagger-*)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No release artifacts were downloaded." >&2
             exit 1

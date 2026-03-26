@@ -11,7 +11,7 @@ pub struct BranchArgs {
     /// The name of the branch to create from the current branch
     pub name: String,
 
-    /// Override the tracked dig parent branch
+    /// Override the tracked dagger parent branch
     #[arg(short = 'p', long = "parent", value_name = "BRANCH")]
     pub parent_branch_name: Option<String>,
 }

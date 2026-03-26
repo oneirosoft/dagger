@@ -5,8 +5,8 @@ use uuid::Uuid;
 use super::{
     BranchAdoptedEvent, BranchArchiveReason, BranchArchivedEvent, BranchCreatedEvent,
     BranchDivergenceState, BranchNode, BranchPullRequestTrackedEvent,
-    BranchPullRequestTrackedSource, BranchReparentedEvent, DigEvent, ParentRef, TrackedPullRequest,
-    now_unix_timestamp_secs, save_state,
+    BranchPullRequestTrackedSource, BranchReparentedEvent, DaggerEvent, ParentRef,
+    TrackedPullRequest, now_unix_timestamp_secs, save_state,
 };
 use crate::core::store::append_event;
 use crate::core::store::session::StoreSession;
@@ -16,7 +16,7 @@ pub fn record_branch_created(session: &mut StoreSession, node: BranchNode) -> io
     save_state(&session.paths, &session.state)?;
     append_event(
         &session.paths,
-        &DigEvent::BranchCreated(BranchCreatedEvent {
+        &DaggerEvent::BranchCreated(BranchCreatedEvent {
             occurred_at_unix_secs: now_unix_timestamp_secs(),
             node,
         }),
@@ -28,7 +28,7 @@ pub fn record_branch_adopted(session: &mut StoreSession, node: BranchNode) -> io
     save_state(&session.paths, &session.state)?;
     append_event(
         &session.paths,
-        &DigEvent::BranchAdopted(BranchAdoptedEvent {
+        &DaggerEvent::BranchAdopted(BranchAdoptedEvent {
             occurred_at_unix_secs: now_unix_timestamp_secs(),
             node,
         }),
@@ -47,7 +47,7 @@ pub fn record_branch_reparented(
     save_state(&session.paths, &session.state)?;
     append_event(
         &session.paths,
-        &DigEvent::BranchReparented(BranchReparentedEvent {
+        &DaggerEvent::BranchReparented(BranchReparentedEvent {
             occurred_at_unix_secs: now_unix_timestamp_secs(),
             branch_id,
             branch_name,
@@ -69,7 +69,7 @@ pub fn record_branch_archived(
     save_state(&session.paths, &session.state)?;
     append_event(
         &session.paths,
-        &DigEvent::BranchArchived(BranchArchivedEvent {
+        &DaggerEvent::BranchArchived(BranchArchivedEvent {
             occurred_at_unix_secs: now_unix_timestamp_secs(),
             branch_id,
             branch_name,
@@ -91,7 +91,7 @@ pub fn record_branch_pull_request_tracked(
     save_state(&session.paths, &session.state)?;
     append_event(
         &session.paths,
-        &DigEvent::BranchPullRequestTracked(BranchPullRequestTrackedEvent {
+        &DaggerEvent::BranchPullRequestTracked(BranchPullRequestTrackedEvent {
             occurred_at_unix_secs: now_unix_timestamp_secs(),
             branch_id,
             branch_name,

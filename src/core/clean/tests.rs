@@ -10,7 +10,7 @@ use crate::core::git::{self, CommitMetadata};
 use crate::core::restack::RestackBaseTarget;
 use crate::core::store::{
     BranchDivergenceState, BranchPullRequestTrackedSource, ParentRef, TrackedPullRequest,
-    dig_paths, load_state, open_initialized, record_branch_pull_request_tracked,
+    dagger_paths, load_state, open_initialized, record_branch_pull_request_tracked,
 };
 use crate::core::test_support::{
     append_file, commit_file, create_tracked_branch, git_ok, initialize_main_repo,
@@ -36,7 +36,7 @@ fn clone_origin(repo: &std::path::Path, clone_name: &str) -> PathBuf {
     let clone_dir = repo.join(clone_name);
     let clone_path = clone_dir.to_string_lossy().into_owned();
     git_ok(repo, &["clone", "origin.git", &clone_path]);
-    git_ok(&clone_dir, &["config", "user.name", "Dig Remote"]);
+    git_ok(&clone_dir, &["config", "user.name", "Dagger Remote"]);
     git_ok(&clone_dir, &["config", "user.email", "remote@example.com"]);
     git_ok(&clone_dir, &["config", "commit.gpgsign", "false"]);
     clone_dir
@@ -109,7 +109,7 @@ fn detects_parent_commit_that_mentions_tracked_pull_request_number() {
         &CommitMetadata {
             sha: "parent".into(),
             subject: "feat: add GitHub PR workflows (#2)".into(),
-            body: "See https://github.com/acme/dig/pull/2 for details.".into(),
+            body: "See https://github.com/oneirosoft/dagger/pull/2 for details.".into(),
         },
         2,
     ));
@@ -125,7 +125,7 @@ fn detects_parent_commit_that_mentions_tracked_pull_request_number() {
 
 #[test]
 fn fresh_branch_is_not_cleanable_without_commits() {
-    with_temp_repo("dig-clean", |repo| {
+    with_temp_repo("dgr-clean", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
 
@@ -146,7 +146,7 @@ fn fresh_branch_is_not_cleanable_without_commits() {
         );
 
         let repo_context = git::resolve_repo_context().unwrap();
-        let state = load_state(&dig_paths(&repo_context.git_dir)).unwrap();
+        let state = load_state(&dagger_paths(&repo_context.git_dir)).unwrap();
         let branch = state.find_branch_by_name("feat/auth").unwrap();
         assert_eq!(
             branch.divergence_state,
@@ -159,7 +159,7 @@ fn fresh_branch_is_not_cleanable_without_commits() {
 
 #[test]
 fn rebased_fresh_branch_remains_not_cleanable() {
-    with_temp_repo("dig-clean", |repo| {
+    with_temp_repo("dgr-clean", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         git_ok(repo, &["checkout", "main"]);
@@ -184,7 +184,7 @@ fn rebased_fresh_branch_remains_not_cleanable() {
         );
 
         let repo_context = git::resolve_repo_context().unwrap();
-        let state = load_state(&dig_paths(&repo_context.git_dir)).unwrap();
+        let state = load_state(&dagger_paths(&repo_context.git_dir)).unwrap();
         let branch = state.find_branch_by_name("feat/auth").unwrap();
         assert_eq!(
             branch.divergence_state,
@@ -197,14 +197,14 @@ fn rebased_fresh_branch_remains_not_cleanable() {
 
 #[test]
 fn legacy_unknown_branch_with_fast_forwarded_manual_commit_is_cleanable() {
-    with_temp_repo("dig-clean", |repo| {
+    with_temp_repo("dgr-clean", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
         git_ok(repo, &["checkout", "main"]);
         git_ok(repo, &["merge", "--ff-only", "feat/auth"]);
 
-        let state_path = repo.join(".git/dig/state.json");
+        let state_path = repo.join(".git/.dagger/state.json");
         let mut state_json =
             serde_json::from_str::<serde_json::Value>(&fs::read_to_string(&state_path).unwrap())
                 .unwrap();
@@ -227,7 +227,7 @@ fn legacy_unknown_branch_with_fast_forwarded_manual_commit_is_cleanable() {
         assert_eq!(plan.candidates[0].branch_name, "feat/auth");
 
         let repo_context = git::resolve_repo_context().unwrap();
-        let state = load_state(&dig_paths(&repo_context.git_dir)).unwrap();
+        let state = load_state(&dagger_paths(&repo_context.git_dir)).unwrap();
         let branch = state.find_branch_by_name("feat/auth").unwrap();
         assert_eq!(branch.divergence_state, BranchDivergenceState::Diverged);
     });
@@ -235,7 +235,7 @@ fn legacy_unknown_branch_with_fast_forwarded_manual_commit_is_cleanable() {
 
 #[test]
 fn cleans_squash_merged_parent_and_restacks_descendants() {
-    with_temp_repo("dig-clean", |repo| {
+    with_temp_repo("dgr-clean", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -300,7 +300,7 @@ fn cleans_squash_merged_parent_and_restacks_descendants() {
         assert!(git::branch_exists("feat/auth-api-tests").unwrap());
 
         let repo_context = git::resolve_repo_context().unwrap();
-        let state = load_state(&dig_paths(&repo_context.git_dir)).unwrap();
+        let state = load_state(&dagger_paths(&repo_context.git_dir)).unwrap();
         let restacked_child = state.find_branch_by_name("feat/auth-api").unwrap();
         let grandchild = state.find_branch_by_name("feat/auth-api-tests").unwrap();
 
@@ -324,7 +324,7 @@ fn cleans_squash_merged_parent_and_restacks_descendants() {
 
 #[test]
 fn clean_plan_detects_local_integration_by_tracked_pull_request_number() {
-    with_temp_repo("dig-clean", |repo| {
+    with_temp_repo("dgr-clean", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: add GitHub PR workflows");
@@ -335,7 +335,7 @@ fn clean_plan_detects_local_integration_by_tracked_pull_request_number() {
             "fix(tree): show PR numbers in lineage views",
         );
 
-        let mut session = open_initialized("dig is not initialized").unwrap();
+        let mut session = open_initialized("dagger is not initialized").unwrap();
         let branch = session
             .state
             .find_branch_by_name("feat/auth")
@@ -387,7 +387,7 @@ fn clean_plan_detects_local_integration_by_tracked_pull_request_number() {
 
 #[test]
 fn sync_plan_detects_remote_only_integrated_branch() {
-    with_temp_repo("dig-clean", |repo| {
+    with_temp_repo("dgr-clean", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
         create_tracked_branch("feat/auth");
@@ -437,7 +437,7 @@ fn sync_plan_detects_remote_only_integrated_branch() {
 
 #[test]
 fn sync_plan_ignores_remote_integration_when_parent_remote_ref_is_missing() {
-    with_temp_repo("dig-clean", |repo| {
+    with_temp_repo("dgr-clean", |repo| {
         initialize_main_repo(repo);
         initialize_origin_remote(repo);
         create_tracked_branch("feat/auth");
@@ -460,7 +460,7 @@ fn sync_plan_ignores_remote_integration_when_parent_remote_ref_is_missing() {
 
 #[test]
 fn returns_to_original_branch_after_cleaning_from_another_checkout() {
-    with_temp_repo("dig-clean", |repo| {
+    with_temp_repo("dgr-clean", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");
@@ -487,7 +487,7 @@ fn returns_to_original_branch_after_cleaning_from_another_checkout() {
 
 #[test]
 fn full_clean_plan_only_lists_deepest_cleanable_branches() {
-    with_temp_repo("dig-clean", |repo| {
+    with_temp_repo("dgr-clean", |repo| {
         initialize_main_repo(repo);
         create_tracked_branch("feat/auth");
         commit_file(repo, "auth.txt", "auth\n", "feat: auth");

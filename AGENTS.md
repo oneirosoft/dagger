@@ -4,7 +4,7 @@ This file documents repo-specific guidance for future coding sessions in this re
 
 ## Goals
 
-- Keep `dig` maintainable as it grows into a stacked-PR workflow tool.
+- Keep `dagger` maintainable as it grows into a stacked-PR workflow tool.
 - Prefer designs that scale to more commands, richer TUI interactions, and more complex branch graph behavior.
 - Avoid quick fixes that introduce brittle data models or tightly coupled command logic.
 
@@ -28,15 +28,15 @@ Typical smoke-test pattern:
 3. Disable local commit signing in the temp repo when needed:
    - `git config commit.gpgSign false`
 4. Create minimal commits needed to produce realistic branch divergence.
-5. Run the built `dig` binary against the temp repo.
+5. Run the built `dgr` binary against the temp repo.
 6. Verify both:
    - visible command output
-   - persisted state under `<git-dir>/dig/`
+   - persisted state under `<git-dir>/.dagger/`
 
 When validating branching behavior, confirm both:
 
 - the actual Git branch base via commit OIDs
-- the stored dig metadata in `state.json`
+- the stored dagger metadata in `state.json`
 
 When validating tree or lineage output, prefer constructing a temp repo with:
 
@@ -105,7 +105,7 @@ Be cautious about:
 - Shared command-specific helpers may live in subdirectories when needed.
 - Keep output formatting consistent with the repo’s existing conventions:
   - simple lineage view for focused branch output
-  - shared-root tree view for `dig tree`
+  - shared-root tree view for `dgr tree`
   - use shared UI markers and palette definitions
 
 ## Verification Notes

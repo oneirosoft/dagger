@@ -10,7 +10,7 @@ use super::common;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct OrphanArgs {
-    /// The tracked branch to stop tracking in dig
+    /// The tracked branch to stop tracking in dagger
     pub branch_name: Option<String>,
 }
 
@@ -47,7 +47,7 @@ impl From<OrphanArgs> for OrphanOptions {
 pub(crate) fn format_orphan_success_output(outcome: &OrphanOutcome, rendered_tree: &str) -> String {
     let mut sections = Vec::new();
     let mut summary_lines = vec![format!(
-        "Orphaned '{}'. It is no longer tracked by dig.",
+        "Orphaned '{}'. It is no longer tracked by dagger.",
         outcome.branch_name
     )];
 
@@ -111,7 +111,7 @@ mod tests {
         assert_eq!(
             output,
             concat!(
-                "Orphaned 'feat/auth'. It is no longer tracked by dig.\n",
+                "Orphaned 'feat/auth'. It is no longer tracked by dagger.\n",
                 "Returned to 'feat/auth' after orphaning.\n\n",
                 "Restacked:\n",
                 "- feat/auth-ui onto main\n\n",
