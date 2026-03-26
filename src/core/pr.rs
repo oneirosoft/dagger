@@ -22,6 +22,17 @@ pub struct PrOptions {
     pub push_if_needed: bool,
 }
 
+impl PrOptions {
+    fn create_pull_request_options(&self, base_branch_name: String) -> CreatePullRequestOptions {
+        CreatePullRequestOptions {
+            base_branch_name,
+            title: self.title.clone(),
+            body: self.body.clone().or_else(|| self.title.clone()),
+            draft: self.draft,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrOutcomeKind {
     AlreadyTracked,
@@ -36,6 +47,7 @@ pub struct PrOutcome {
     pub branch_name: String,
     pub base_branch_name: String,
     pub pull_request: TrackedPullRequest,
+    pub created_pull_request_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +123,7 @@ pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
             branch_name,
             base_branch_name,
             pull_request,
+            created_pull_request_url: None,
         });
     }
 
@@ -142,12 +155,9 @@ pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
                 }
             }
 
-            let created_pull_request = gh::create_pull_request(&CreatePullRequestOptions {
-                base_branch_name: base_branch_name.clone(),
-                title: options.title.clone(),
-                body: options.body.clone(),
-                draft: options.draft,
-            })?;
+            let created_pull_request = gh::create_pull_request(
+                &options.create_pull_request_options(base_branch_name.clone()),
+            )?;
             let pull_request = TrackedPullRequest {
                 number: created_pull_request.number,
             };
@@ -166,6 +176,9 @@ pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
                 branch_name,
                 base_branch_name,
                 pull_request,
+                created_pull_request_url: created_pull_request
+                    .display_url_in_dig
+                    .then_some(created_pull_request.url),
             })
         }
         PrTrackingAction::Adopt(existing_pull_request) => {
@@ -187,6 +200,7 @@ pub fn run(options: &PrOptions) -> io::Result<PrOutcome> {
                 branch_name,
                 base_branch_name,
                 pull_request,
+                created_pull_request_url: None,
             })
         }
     }
@@ -407,9 +421,10 @@ fn collect_pull_requests_in_order(
 #[cfg(test)]
 mod tests {
     use super::{
-        PrTrackingAction, TrackedPullRequestListNode, build_pull_request_list_nodes,
+        PrOptions, PrTrackingAction, TrackedPullRequestListNode, build_pull_request_list_nodes,
         collect_pull_requests_in_order, resolve_tracking_action,
     };
+    use crate::core::gh::CreatePullRequestOptions;
     use crate::core::gh::PullRequestDetails;
     use crate::core::gh::PullRequestSummary;
     use crate::core::tree::TreeNode;
@@ -420,6 +435,27 @@ mod tests {
         let action = resolve_tracking_action("feat/auth", "main", &[]).unwrap();
 
         assert_eq!(action, PrTrackingAction::Create);
+    }
+
+    #[test]
+    fn defaults_create_body_to_title_when_body_is_absent() {
+        let create_options = PrOptions {
+            title: Some("feat: auth".into()),
+            body: None,
+            draft: true,
+            push_if_needed: false,
+        }
+        .create_pull_request_options("main".into());
+
+        assert_eq!(
+            create_options,
+            CreatePullRequestOptions {
+                base_branch_name: "main".into(),
+                title: Some("feat: auth".into()),
+                body: Some("feat: auth".into()),
+                draft: true,
+            }
+        );
     }
 
     #[test]

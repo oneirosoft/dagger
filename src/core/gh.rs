@@ -51,6 +51,7 @@ pub struct CreatePullRequestOptions {
 pub struct CreatedPullRequest {
     pub number: u64,
     pub url: String,
+    pub display_url_in_dig: bool,
 }
 
 #[derive(Debug)]
@@ -62,15 +63,7 @@ struct GhCommandOutput {
 
 impl GhCommandOutput {
     fn combined_output(&self) -> String {
-        let stdout = self.stdout.trim();
-        let stderr = self.stderr.trim();
-
-        match (stdout.is_empty(), stderr.is_empty()) {
-            (true, true) => String::new(),
-            (false, true) => stdout.to_string(),
-            (true, false) => stderr.to_string(),
-            (false, false) => format!("{stdout}\n{stderr}"),
-        }
+        combine_command_output(&self.stdout, &self.stderr)
     }
 }
 
@@ -128,28 +121,13 @@ pub fn list_open_pull_requests_for_head(branch_name: &str) -> io::Result<Vec<Pul
 }
 
 pub fn create_pull_request(options: &CreatePullRequestOptions) -> io::Result<CreatedPullRequest> {
-    let mut args = vec![
-        "pr".to_string(),
-        "create".to_string(),
-        "--base".to_string(),
-        options.base_branch_name.clone(),
-    ];
-
-    if let Some(title) = &options.title {
-        args.push("--title".to_string());
-        args.push(title.clone());
-    }
-
-    if let Some(body) = &options.body {
-        args.push("--body".to_string());
-        args.push(body.clone());
-    }
-
-    if options.draft {
-        args.push("--draft".to_string());
-    }
-
-    let output = run_gh_with_live_output(&args)?;
+    let args = build_create_pull_request_args(options);
+    let display_url_in_dig = options.title.is_some() || options.body.is_some();
+    let output = if display_url_in_dig {
+        run_gh_capture_output(&args)?
+    } else {
+        run_gh_with_live_output(&args)?
+    };
     if !output.status.success() {
         return Err(gh_command_failed(
             "gh pr create",
@@ -163,10 +141,16 @@ pub fn create_pull_request(options: &CreatePullRequestOptions) -> io::Result<Cre
     })?;
 
     if let Some(number) = pull_request_number_from_url(&url) {
-        return Ok(CreatedPullRequest { number, url });
+        return Ok(CreatedPullRequest {
+            number,
+            url,
+            display_url_in_dig,
+        });
     }
 
-    view_pull_request_by_url(&url)
+    let mut created_pull_request = view_pull_request_by_url(&url)?;
+    created_pull_request.display_url_in_dig = display_url_in_dig;
+    Ok(created_pull_request)
 }
 
 pub fn view_pull_request(number: u64) -> io::Result<PullRequestStatus> {
@@ -276,6 +260,7 @@ fn view_pull_request_by_url(url: &str) -> io::Result<CreatedPullRequest> {
     Ok(CreatedPullRequest {
         number: record.number,
         url: record.url,
+        display_url_in_dig: false,
     })
 }
 
@@ -323,6 +308,30 @@ fn parse_pull_request_status(stdout: &str) -> io::Result<PullRequestStatus> {
     })
 }
 
+fn build_create_pull_request_args(options: &CreatePullRequestOptions) -> Vec<String> {
+    let mut args = vec![
+        "pr".to_string(),
+        "create".to_string(),
+        "--base".to_string(),
+        options.base_branch_name.clone(),
+    ];
+
+    if let Some(title) = &options.title {
+        args.push("--title".to_string());
+        args.push(title.clone());
+    }
+
+    if let Some(body) = &options.body {
+        args.push("--body".to_string());
+        args.push(body.clone());
+    }
+
+    if options.draft {
+        args.push("--draft".to_string());
+    }
+
+    args
+}
 fn find_pull_request_url(output: &str) -> Option<String> {
     output
         .split_whitespace()
@@ -454,22 +463,43 @@ fn normalize_gh_spawn_error(err: io::Error) -> io::Error {
 }
 
 fn gh_command_failed(command_name: &str, stdout: &str, stderr: &str) -> io::Error {
-    let combined = match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
-        (true, true) => String::new(),
-        (false, true) => stdout.trim().to_string(),
-        (true, false) => stderr.trim().to_string(),
-        (false, false) => format!("{}\n{}", stdout.trim(), stderr.trim()),
-    };
+    let combined = combine_command_output(stdout, stderr);
 
     if looks_like_auth_error(&combined) {
         return io::Error::other("gh authentication failed; run 'gh auth login'");
     }
 
-    if combined.is_empty() {
+    let sanitized = sanitize_gh_failure_output(&combined);
+    if sanitized.is_empty() {
         io::Error::other(format!("{command_name} failed"))
     } else {
-        io::Error::other(format!("{command_name} failed: {combined}"))
+        io::Error::other(format!("{command_name} failed: {sanitized}"))
     }
+}
+
+fn combine_command_output(stdout: &str, stderr: &str) -> String {
+    let stdout = stdout.trim();
+    let stderr = stderr.trim();
+
+    match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout.to_string(),
+        (true, false) => stderr.to_string(),
+        (false, false) => format!("{stdout}\n{stderr}"),
+    }
+}
+
+fn sanitize_gh_failure_output(output: &str) -> String {
+    let mut lines = Vec::new();
+
+    for line in output.lines() {
+        if line.trim_start().starts_with("Usage:") {
+            break;
+        }
+        lines.push(line);
+    }
+
+    lines.join("\n").trim().to_string()
 }
 
 fn looks_like_auth_error(message: &str) -> bool {
@@ -483,8 +513,9 @@ fn looks_like_auth_error(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        PullRequestState, find_pull_request_url, parse_open_pull_request_details,
-        parse_open_pull_requests, parse_pull_request_status, pull_request_number_from_url,
+        CreatePullRequestOptions, PullRequestState, build_create_pull_request_args,
+        find_pull_request_url, parse_open_pull_request_details, parse_open_pull_requests,
+        parse_pull_request_status, pull_request_number_from_url, sanitize_gh_failure_output,
     };
 
     #[test]
@@ -542,5 +573,39 @@ mod tests {
             pull_request_number_from_url("https://github.com/acme/dig/issues/456"),
             None
         );
+    }
+
+    #[test]
+    fn builds_create_pull_request_args_from_options() {
+        let args = build_create_pull_request_args(&CreatePullRequestOptions {
+            base_branch_name: "main".into(),
+            title: Some("feat: auth".into()),
+            body: Some("feat: auth".into()),
+            draft: true,
+        });
+
+        assert_eq!(
+            args,
+            vec![
+                "pr",
+                "create",
+                "--base",
+                "main",
+                "--title",
+                "feat: auth",
+                "--body",
+                "feat: auth",
+                "--draft",
+            ]
+        );
+    }
+
+    #[test]
+    fn strips_usage_block_from_gh_failure_output() {
+        let sanitized = sanitize_gh_failure_output(
+            "must provide `--title` and `--body`\n\nUsage:  gh pr create [flags]\n\nFlags:\n  -b, --body string\n",
+        );
+
+        assert_eq!(sanitized, "must provide `--title` and `--body`");
     }
 }
