@@ -261,7 +261,7 @@ pub fn ensure_clean_worktree(command_name: &str) -> io::Result<()> {
         Ok(())
     } else {
         Err(io::Error::other(format!(
-            "dig {command_name} requires a clean working tree"
+            "{command_name} requires a clean working tree"
         )))
     }
 }
