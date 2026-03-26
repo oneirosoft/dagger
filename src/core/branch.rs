@@ -3,6 +3,7 @@ use std::process::ExitStatus;
 
 use uuid::Uuid;
 
+use crate::core::graph::BranchLineageNode;
 use crate::core::git;
 use crate::core::graph::BranchGraph;
 use crate::core::store::types::DigState;
@@ -21,7 +22,7 @@ pub struct BranchOptions {
 pub struct BranchOutcome {
     pub status: ExitStatus,
     pub created_node: Option<BranchNode>,
-    pub lineage: Vec<String>,
+    pub lineage: Vec<BranchLineageNode>,
 }
 
 pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
@@ -88,7 +89,10 @@ pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
         return Ok(BranchOutcome {
             status,
             created_node: None,
-            lineage: vec![branch_name.to_string()],
+            lineage: vec![BranchLineageNode {
+                branch_name: branch_name.to_string(),
+                pull_request_number: None,
+            }],
         });
     }
 

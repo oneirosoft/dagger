@@ -1,13 +1,14 @@
 use crate::cli::common;
+use crate::core::graph::BranchLineageNode;
 use crate::core::tree::{TreeLabel, TreeView};
 use crate::ui::markers;
 use crate::ui::palette::Accent;
 
-pub fn render_branch_lineage(lineage: &[String]) -> String {
+pub fn render_branch_lineage(lineage: &[BranchLineageNode]) -> String {
     let mut lines = Vec::new();
 
-    for (index, branch_name) in lineage.iter().enumerate() {
-        lines.push(format_lineage_branch(branch_name, index == 0));
+    for (index, branch) in lineage.iter().enumerate() {
+        lines.push(format_lineage_branch(branch, index == 0));
 
         if index + 1 < lineage.len() {
             lines.push(format!("{} ", markers::LINEAGE_PIPE));
@@ -59,29 +60,41 @@ fn format_branch_label(
     }
 }
 
-fn format_lineage_branch(branch_name: &str, is_current: bool) -> String {
+fn format_lineage_branch(branch: &BranchLineageNode, is_current: bool) -> String {
+    let label = format_branch_text(&branch.branch_name, branch.pull_request_number);
+
     if is_current {
         format!(
             "{} {}",
             Accent::BranchRef.paint_ansi(markers::CURRENT_BRANCH),
-            Accent::BranchRef.paint_ansi(branch_name)
+            Accent::BranchRef.paint_ansi(&label)
         )
     } else {
-        format!("{}  {}", markers::NON_CURRENT_BRANCH, branch_name)
+        format!("{}  {}", markers::NON_CURRENT_BRANCH, label)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{render_branch_lineage, render_stack_tree};
+    use crate::core::graph::BranchLineageNode;
     use crate::core::tree::{TreeLabel, TreeNode, TreeView};
 
     #[test]
     fn renders_linear_branch_lineage_as_vertical_path() {
         let tree = render_branch_lineage(&[
-            "feature/api-followup".into(),
-            "feature/api".into(),
-            "main".into(),
+            BranchLineageNode {
+                branch_name: "feature/api-followup".into(),
+                pull_request_number: None,
+            },
+            BranchLineageNode {
+                branch_name: "feature/api".into(),
+                pull_request_number: None,
+            },
+            BranchLineageNode {
+                branch_name: "main".into(),
+                pull_request_number: None,
+            },
         ]);
 
         assert_eq!(
@@ -98,9 +111,41 @@ mod tests {
 
     #[test]
     fn renders_single_branch_lineage_without_connectors() {
-        let tree = render_branch_lineage(&["main".into()]);
+        let tree = render_branch_lineage(&[BranchLineageNode {
+            branch_name: "main".into(),
+            pull_request_number: None,
+        }]);
 
         assert_eq!(tree, "\u{1b}[32m✓\u{1b}[0m \u{1b}[32mmain\u{1b}[0m");
+    }
+
+    #[test]
+    fn renders_pull_request_numbers_in_lineage_view() {
+        let tree = render_branch_lineage(&[
+            BranchLineageNode {
+                branch_name: "feature/api-followup".into(),
+                pull_request_number: Some(43),
+            },
+            BranchLineageNode {
+                branch_name: "feature/api".into(),
+                pull_request_number: Some(42),
+            },
+            BranchLineageNode {
+                branch_name: "main".into(),
+                pull_request_number: None,
+            },
+        ]);
+
+        assert_eq!(
+            tree,
+            concat!(
+                "\u{1b}[32m✓\u{1b}[0m \u{1b}[32mfeature/api-followup (#43)\u{1b}[0m\n",
+                "│ \n",
+                "*  feature/api (#42)\n",
+                "│ \n",
+                "*  main"
+            )
+        );
     }
 
     #[test]
