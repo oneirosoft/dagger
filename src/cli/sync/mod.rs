@@ -166,6 +166,25 @@ pub fn execute(args: SyncArgs) -> io::Result<CommandOutcome> {
                 }
 
                 if final_status.success() {
+                    let pull_request_update_plan =
+                        sync::plan_pull_request_updates(&restacked_branch_names)?;
+                    if !pull_request_update_plan.actions.is_empty() {
+                        if printed_output {
+                            println!();
+                        }
+
+                        let updated_pull_requests =
+                            sync::execute_pull_request_update_plan(&pull_request_update_plan)?;
+                        let output =
+                            format_pull_request_update_success_output(&updated_pull_requests);
+                        if !output.is_empty() {
+                            println!("{output}");
+                            printed_output = true;
+                        }
+                    }
+                }
+
+                if final_status.success() {
                     let push_plan =
                         sync::plan_remote_pushes(&restacked_branch_names, &excluded_branch_names)?;
 
@@ -274,6 +293,24 @@ fn format_remote_push_plan(plan: &sync::RemotePushPlan) -> String {
         lines.push(format!(
             "- {action_label} {} on {}",
             action.target.branch_name, action.target.remote_name
+        ));
+    }
+
+    lines.join("\n")
+}
+
+fn format_pull_request_update_success_output(
+    updated_pull_requests: &[sync::PullRequestUpdateAction],
+) -> String {
+    if updated_pull_requests.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = vec!["Updated pull requests:".to_string()];
+    for action in updated_pull_requests {
+        lines.push(format!(
+            "- retargeted #{} for {} to {}",
+            action.pull_request_number, action.branch_name, action.new_base_branch_name
         ));
     }
 

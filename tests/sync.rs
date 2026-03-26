@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use support::{
-    active_rebase_head_name, commit_file, dig, dig_ok, dig_with_input, find_archived_node,
-    find_node, git_ok, git_stdout, initialize_main_repo, load_events_json, load_operation_json,
-    load_state_json, overwrite_file, strip_ansi, with_temp_repo, write_file,
+    active_rebase_head_name, commit_file, dig, dig_ok, dig_with_input, dig_with_input_and_env,
+    find_archived_node, find_node, git_ok, git_stdout, initialize_main_repo,
+    install_fake_executable, load_events_json, load_operation_json, load_state_json,
+    overwrite_file, path_with_prepend, strip_ansi, with_temp_repo, write_file,
 };
 
 fn initialize_origin_remote(repo: &Path) {
@@ -48,6 +49,16 @@ fn track_pull_request_number(repo: &Path, branch_name: &str, number: u64) {
         .unwrap();
     node["pull_request"] = json!({ "number": number });
     fs::write(state_path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+}
+
+fn install_fake_gh(repo: &Path, script: &str) -> (PathBuf, String, String) {
+    let bin_dir = repo.join(".git").join("fake-bin");
+    install_fake_executable(&bin_dir, "gh", script);
+
+    let path = path_with_prepend(&bin_dir);
+    let log_path = repo.join(".git").join("gh.log").display().to_string();
+
+    (bin_dir, path, log_path)
 }
 
 fn setup_remotely_merged_root_branch_with_local_trunk_advance(repo: &Path) {
@@ -777,6 +788,105 @@ fn sync_prompts_to_push_active_branch_ahead_of_remote() {
         assert_eq!(
             git_stdout(repo, &["rev-parse", "feat/auth"]),
             git_stdout(repo, &["rev-parse", "origin/feat/auth"])
+        );
+    });
+}
+
+#[test]
+fn sync_restacks_child_of_missing_merged_parent_pr_using_tracked_pr_head() {
+    with_temp_repo("dig-sync-cli", |repo| {
+        initialize_main_repo(repo);
+        initialize_origin_remote(repo);
+        dig_ok(repo, &["init"]);
+        dig_ok(repo, &["branch", "feat/auth"]);
+        commit_file(repo, "auth.txt", "auth\n", "feat: auth");
+        git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
+        track_pull_request_number(repo, "feat/auth", 3);
+        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        commit_file(repo, "ui.txt", "ui\n", "feat: ui");
+        git_ok(repo, &["push", "-u", "origin", "feat/auth-ui"]);
+        track_pull_request_number(repo, "feat/auth-ui", 4);
+
+        let parent_head_oid = git_stdout(repo, &["rev-parse", "feat/auth"]);
+        let child_head_oid = git_stdout(repo, &["rev-parse", "feat/auth-ui"]);
+        let remote_repo = clone_origin(repo, "origin-worktree-pr-retarget");
+        git_ok(&remote_repo, &["checkout", "main"]);
+        git_ok(&remote_repo, &["merge", "--squash", "origin/feat/auth"]);
+        git_ok(
+            &remote_repo,
+            &["commit", "--quiet", "-m", "feat: merge auth (#3)"],
+        );
+        git_ok(&remote_repo, &["push", "origin", "main"]);
+        git_ok(repo, &["checkout", "main"]);
+        git_ok(repo, &["pull", "--ff-only", "origin", "main"]);
+        git_ok(repo, &["branch", "-D", "feat/auth"]);
+
+        let (_, path, log_path) = install_fake_gh(
+            repo,
+            &format!(
+                r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "3" ]; then
+  printf '{{"baseRefName":"main","headRefName":"feat/auth","headRefOid":"{parent_head_oid}","number":3,"state":"MERGED","url":"https://github.com/acme/dig/pull/3"}}\n'
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "4" ]; then
+  printf '{{"baseRefName":"feat/auth","headRefName":"feat/auth-ui","headRefOid":"{child_head_oid}","number":4,"state":"OPEN","url":"https://github.com/acme/dig/pull/4"}}\n'
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "edit" ] && [ "$3" = "4" ] && [ "$4" = "--base" ] && [ "$5" = "main" ]; then
+  exit 0
+fi
+echo "unexpected gh args: $*" >&2
+exit 1
+"#
+            ),
+        );
+
+        let output = dig_with_input_and_env(
+            repo,
+            &["sync"],
+            "y\n",
+            &[
+                ("PATH", path.as_str()),
+                ("DIG_TEST_GH_LOG", log_path.as_str()),
+            ],
+        );
+        let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
+
+        assert!(output.status.success());
+        assert!(stdout.contains("Deleted locally and no longer tracked by dig:"));
+        assert!(stdout.contains("- feat/auth"));
+        assert!(stdout.contains("Restacked:"));
+        assert!(stdout.contains("- feat/auth-ui onto main"));
+        assert!(stdout.contains("Updated pull requests:"));
+        assert!(stdout.contains("- retargeted #4 for feat/auth-ui to main"));
+        assert!(stdout.contains("Remote branches to update:"));
+        assert!(stdout.contains("- force-push feat/auth-ui on origin"));
+        assert!(stdout.contains("Updated remote branches:"));
+        assert!(stdout.contains("- force-pushed feat/auth-ui on origin"));
+
+        assert_eq!(
+            git_stdout(repo, &["merge-base", "main", "feat/auth-ui"]),
+            git_stdout(repo, &["rev-parse", "main"])
+        );
+
+        let state = load_state_json(repo);
+        let child = find_node(&state, "feat/auth-ui").unwrap();
+        assert_eq!(child["base_ref"], "main");
+        assert_eq!(child["parent"]["kind"], "trunk");
+        assert!(find_archived_node(&state, "feat/auth").is_some());
+
+        let gh_log = fs::read_to_string(log_path).unwrap();
+        let lines = gh_log.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines,
+            vec![
+                "pr view 3 --json number,state,baseRefName,headRefName,headRefOid,url",
+                "pr view 4 --json number,state,baseRefName,headRefName,headRefOid,url",
+                "pr edit 4 --base main",
+            ]
         );
     });
 }
