@@ -1107,6 +1107,104 @@ exit 1
 }
 
 #[test]
+fn sync_removes_local_parent_branch_after_repair_when_parent_was_merged_upstream() {
+    with_temp_repo("dig-sync-cli", |repo| {
+        initialize_main_repo(repo);
+        initialize_origin_remote(repo);
+        dig_ok(repo, &["init"]);
+        dig_ok(repo, &["branch", "feat/root"]);
+        commit_file(repo, "root.txt", "root\n", "feat: root");
+        git_ok(repo, &["push", "-u", "origin", "feat/root"]);
+        track_pull_request_number(repo, "feat/root", 101);
+        dig_ok(repo, &["branch", "feat/auth"]);
+        commit_file(repo, "auth.txt", "auth\n", "feat: auth");
+        git_ok(repo, &["push", "-u", "origin", "feat/auth"]);
+        track_pull_request_number(repo, "feat/auth", 102);
+        dig_ok(repo, &["branch", "feat/auth-ui"]);
+        commit_file(repo, "ui.txt", "ui\n", "feat: ui");
+        git_ok(repo, &["push", "-u", "origin", "feat/auth-ui"]);
+        track_pull_request_number(repo, "feat/auth-ui", 103);
+
+        let parent_head_oid = git_stdout(repo, &["rev-parse", "feat/auth"]);
+        let remote_repo = clone_origin(repo, "origin-worktree-local-parent");
+        git_ok(&remote_repo, &["checkout", "main"]);
+        git_ok(&remote_repo, &["merge", "--squash", "origin/feat/root"]);
+        git_ok(
+            &remote_repo,
+            &["commit", "--quiet", "-m", "feat: merge root"],
+        );
+        git_ok(&remote_repo, &["push", "origin", "main"]);
+        git_ok(&remote_repo, &["push", "origin", "--delete", "feat/root"]);
+        git_ok(&remote_repo, &["push", "origin", "--delete", "feat/auth"]);
+
+        git_ok(repo, &["checkout", "main"]);
+        git_ok(repo, &["branch", "-D", "feat/root"]);
+        set_branch_archived(repo, "feat/root", true);
+
+        let remote_update_log = install_remote_update_logger(repo);
+        let (path, gh_log_path) = install_fake_gh(
+            repo,
+            &format!(
+                r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$DIG_TEST_GH_LOG"
+if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "102" ]; then
+  printf '{{"number":102,"state":"MERGED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/root","headRefName":"feat/auth","headRefOid":"{parent_head_oid}","isDraft":false,"url":"https://github.com/acme/dig/pull/102"}}\n'
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "view" ] && [ "$3" = "103" ]; then
+  printf '{{"number":103,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/acme/dig/pull/103"}}\n'
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "reopen" ] && [ "$3" = "103" ]; then
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "ready" ] && [ "$3" = "103" ] && [ "$4" = "--undo" ]; then
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "edit" ] && [ "$3" = "103" ] && [ "$4" = "--base" ] && [ "$5" = "main" ]; then
+  exit 0
+fi
+echo "unexpected gh args: $*" >&2
+exit 1
+"#
+            ),
+        );
+
+        let output = dig_with_input_and_env(
+            repo,
+            &["sync"],
+            "n\n",
+            &[
+                ("PATH", path.as_str()),
+                ("DIG_TEST_GH_LOG", gh_log_path.as_str()),
+            ],
+        );
+        let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+
+        assert!(
+            output.status.success(),
+            "stdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        assert!(stdout.contains("Recovered pull requests:"));
+        assert!(stdout.contains("Deleted locally and no longer tracked by dig:"));
+        assert!(stdout.contains("- feat/auth"));
+        assert_eq!(git_stdout(repo, &["branch", "--list", "feat/auth"]), "");
+
+        let state = load_state_json(repo);
+        let child = find_node(&state, "feat/auth-ui").unwrap();
+        assert_eq!(child["base_ref"], "main");
+        assert_eq!(child["parent"]["kind"], "trunk");
+        assert!(find_archived_node(&state, "feat/auth").is_some());
+        assert_eq!(
+            count_remote_ref_updates(&remote_update_log, "refs/heads/feat/auth"),
+            2
+        );
+    });
+}
+
+#[test]
 fn sync_aborts_before_local_cleanup_when_pull_request_repair_fails() {
     with_temp_repo("dig-sync-cli", |repo| {
         setup_remotely_merged_root_branch_with_children(

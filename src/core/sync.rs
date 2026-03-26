@@ -7,8 +7,9 @@ use crate::core::deleted_local;
 use crate::core::gh::{self, PullRequestState, PullRequestStatus};
 use crate::core::graph::BranchGraph;
 use crate::core::restack::{self, RestackAction, RestackPreview};
+use crate::core::store::types::DigState;
 use crate::core::store::{
-    BranchNode, PendingOperationKind, PendingOperationState, PendingSyncOperation,
+    BranchNode, ParentRef, PendingOperationKind, PendingOperationState, PendingSyncOperation,
     PendingSyncPhase, clear_operation, load_operation, open_initialized,
 };
 use crate::core::workflow;
@@ -256,8 +257,10 @@ fn run_full_sync() -> io::Result<SyncOutcome> {
     } else {
         Vec::new()
     };
-
     let original_branch = git::current_branch_name()?;
+    if remote_sync_enabled {
+        delete_local_branches_merged_into_deleted_parent_branches(&session, &original_branch)?;
+    }
     let outcome = execute_local_sync(
         &mut session,
         original_branch,
@@ -668,6 +671,73 @@ fn repair_closed_pull_requests_for_deleted_parent_branches(
     }
 
     Ok(repaired_pull_requests)
+}
+
+fn delete_local_branches_merged_into_deleted_parent_branches(
+    session: &crate::core::store::StoreSession,
+    current_branch_name: &str,
+) -> io::Result<()> {
+    let graph = BranchGraph::new(&session.state);
+    let mut candidates = session
+        .state
+        .nodes
+        .iter()
+        .filter(|node| !node.archived)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    candidates.sort_by(|left, right| {
+        graph
+            .branch_depth(right.id)
+            .cmp(&graph.branch_depth(left.id))
+            .then_with(|| left.branch_name.cmp(&right.branch_name))
+    });
+
+    for node in candidates {
+        if node.branch_name == current_branch_name || !git::branch_exists(&node.branch_name)? {
+            continue;
+        }
+        if !parent_branch_is_unavailable_for_sync_cleanup(&session.state, &node)? {
+            continue;
+        }
+
+        let Some(remote_target) = git::branch_push_target(&node.branch_name)? else {
+            continue;
+        };
+        if git::remote_tracking_branch_exists(
+            &remote_target.remote_name,
+            &remote_target.branch_name,
+        )? {
+            continue;
+        }
+        if merged_pull_request_restore_source(&node)?.is_none() {
+            continue;
+        }
+
+        let delete_status = git::delete_branch_force(&node.branch_name)?;
+        if !delete_status.success() {
+            return Err(io::Error::other(format!(
+                "failed to remove merged local branch '{}' before sync cleanup",
+                node.branch_name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn parent_branch_is_unavailable_for_sync_cleanup(
+    state: &DigState,
+    node: &BranchNode,
+) -> io::Result<bool> {
+    let ParentRef::Branch { node_id } = node.parent else {
+        return Ok(false);
+    };
+    let Some(parent_node) = state.find_any_branch_by_id(node_id) else {
+        return Ok(false);
+    };
+
+    Ok(parent_node.archived || !git::branch_exists(&parent_node.branch_name)?)
 }
 
 fn plan_parent_pull_request_repair(
