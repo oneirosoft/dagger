@@ -101,6 +101,7 @@ fn visual_node_from_tree(tree: &CleanTreeNode) -> VisualNode {
 mod tests {
     use super::CleanAnimation;
     use crate::core::clean::{CleanCandidate, CleanEvent, CleanPlan, CleanReason, CleanTreeNode};
+    use crate::core::restack::RestackBaseTarget;
     use uuid::Uuid;
 
     #[test]
@@ -114,7 +115,7 @@ mod tests {
                 branch_name: "feat/auth".into(),
                 parent_branch_name: "main".into(),
                 reason: CleanReason::IntegratedIntoParent {
-                    parent_branch: "main".into(),
+                    parent_base: RestackBaseTarget::local("main"),
                 },
                 tree: CleanTreeNode {
                     branch_name: "feat/auth".into(),

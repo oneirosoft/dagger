@@ -306,21 +306,12 @@ where
                 &node.branch_name,
             )?,
         )?,
-        PendingCleanCandidateKind::IntegratedIntoParent => {
-            let Some(parent_branch_name) = BranchGraph::new(&session.state)
-                .parent_branch_name(&node, &session.config.trunk_branch)
-            else {
-                return Err(io::Error::other(format!(
-                    "tracked parent for '{}' is missing from dig",
-                    node.branch_name
-                )));
-            };
-
+        PendingCleanCandidateKind::IntegratedIntoParent { ref parent_base } => {
             restack::plan_after_branch_detach(
                 &session.state,
                 node.id,
                 &node.branch_name,
-                &parent_branch_name,
+                parent_base,
                 &node.parent,
             )?
         }
@@ -341,19 +332,19 @@ where
         &mut |event| match event {
             RestackExecutionEvent::Started(action) => reporter(CleanEvent::RebaseStarted {
                 branch_name: action.branch_name.clone(),
-                onto_branch: action.new_base_branch_name.clone(),
+                onto_branch: action.new_base.branch_name.clone(),
             }),
             RestackExecutionEvent::Progress { action, progress } => {
                 reporter(CleanEvent::RebaseProgress {
                     branch_name: action.branch_name.clone(),
-                    onto_branch: action.new_base_branch_name.clone(),
+                    onto_branch: action.new_base.branch_name.clone(),
                     current_commit: progress.current,
                     total_commits: progress.total,
                 })
             }
             RestackExecutionEvent::Completed(action) => reporter(CleanEvent::RebaseCompleted {
                 branch_name: action.branch_name.clone(),
-                onto_branch: action.new_base_branch_name.clone(),
+                onto_branch: action.new_base.branch_name.clone(),
             }),
         },
     )?;
@@ -411,7 +402,7 @@ where
             untracked_branches.push(candidate.branch_name.clone());
             git::success_status()
         }
-        PendingCleanCandidateKind::IntegratedIntoParent => {
+        PendingCleanCandidateKind::IntegratedIntoParent { .. } => {
             let status = delete_clean_candidate(session, &candidate.branch_name, reporter)?;
             if status.success() {
                 deleted_branches.push(candidate.branch_name.clone());
@@ -428,8 +419,10 @@ fn pending_clean_candidate_from_clean_candidate(
         branch_name: candidate.branch_name.clone(),
         kind: match &candidate.reason {
             CleanReason::DeletedLocally => PendingCleanCandidateKind::DeletedLocally,
-            CleanReason::IntegratedIntoParent { .. } => {
-                PendingCleanCandidateKind::IntegratedIntoParent
+            CleanReason::IntegratedIntoParent { parent_base } => {
+                PendingCleanCandidateKind::IntegratedIntoParent {
+                    parent_base: parent_base.clone(),
+                }
             }
         },
     }

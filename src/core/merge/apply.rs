@@ -95,7 +95,7 @@ where
         &session.state,
         node.id,
         &node.branch_name,
-        &plan.target_branch_name,
+        &restack::RestackBaseTarget::local(&plan.target_branch_name),
         &node.parent,
     )?;
 
@@ -112,19 +112,19 @@ where
         &mut |event| match event {
             RestackExecutionEvent::Started(action) => reporter(MergeEvent::RebaseStarted {
                 branch_name: action.branch_name.clone(),
-                onto_branch: action.new_base_branch_name.clone(),
+                onto_branch: action.new_base.branch_name.clone(),
             }),
             RestackExecutionEvent::Progress { action, progress } => {
                 reporter(MergeEvent::RebaseProgress {
                     branch_name: action.branch_name.clone(),
-                    onto_branch: action.new_base_branch_name.clone(),
+                    onto_branch: action.new_base.branch_name.clone(),
                     current_commit: progress.current,
                     total_commits: progress.total,
                 })
             }
             RestackExecutionEvent::Completed(action) => reporter(MergeEvent::RebaseCompleted {
                 branch_name: action.branch_name.clone(),
-                onto_branch: action.new_base_branch_name.clone(),
+                onto_branch: action.new_base.branch_name.clone(),
             }),
         },
     )?;

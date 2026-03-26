@@ -42,7 +42,7 @@ pub(crate) fn apply(plan: &OrphanPlan) -> io::Result<OrphanOutcome> {
         &session.state,
         node.id,
         &node.branch_name,
-        &parent_branch_name,
+        &restack::RestackBaseTarget::local(&parent_branch_name),
         &node.parent,
     )?;
     let restack_outcome = workflow::execute_resumable_restack_operation(

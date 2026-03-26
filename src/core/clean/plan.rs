@@ -4,7 +4,7 @@ use std::io;
 use crate::core::deleted_local;
 use crate::core::git::{self, CherryMarker, CommitMetadata};
 use crate::core::graph::BranchGraph;
-use crate::core::restack;
+use crate::core::restack::{self, RestackBaseTarget};
 use crate::core::store::types::DigState;
 use crate::core::store::{BranchNode, dig_paths, load_config, load_state};
 use crate::core::workflow;
@@ -19,7 +19,29 @@ enum BranchEvaluation {
     Blocked(BlockedBranch),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CleanPlanMode {
+    LocalOnly,
+    RemoteAwareSync,
+}
+
 pub(crate) fn plan(options: &CleanOptions) -> io::Result<CleanPlan> {
+    plan_with_mode(options, CleanPlanMode::LocalOnly)
+}
+
+pub(crate) fn plan_for_sync() -> io::Result<CleanPlan> {
+    plan_with_mode(&CleanOptions::default(), CleanPlanMode::RemoteAwareSync)
+}
+
+pub(crate) fn mode_for_sync(remote_sync_enabled: bool) -> CleanPlanMode {
+    if remote_sync_enabled {
+        CleanPlanMode::RemoteAwareSync
+    } else {
+        CleanPlanMode::LocalOnly
+    }
+}
+
+fn plan_with_mode(options: &CleanOptions, mode: CleanPlanMode) -> io::Result<CleanPlan> {
     workflow::ensure_no_pending_operation_for_command("clean")?;
     let repo = git::resolve_repo_context()?;
     let store_paths = dig_paths(&repo.git_dir);
@@ -35,10 +57,14 @@ pub(crate) fn plan(options: &CleanOptions) -> io::Result<CleanPlan> {
         .map(str::to_string);
 
     match &requested_branch_name {
-        Some(branch_name) => {
-            plan_for_requested_branch(&state, &config.trunk_branch, &current_branch, branch_name)
-        }
-        None => plan_for_all_branches(&state, &config.trunk_branch, &current_branch),
+        Some(branch_name) => plan_for_requested_branch(
+            &state,
+            &config.trunk_branch,
+            &current_branch,
+            branch_name,
+            mode,
+        ),
+        None => plan_for_all_branches(&state, &config.trunk_branch, &current_branch, mode),
     }
 }
 
@@ -47,6 +73,7 @@ fn plan_for_requested_branch(
     trunk_branch: &str,
     current_branch: &str,
     branch_name: &str,
+    mode: CleanPlanMode,
 ) -> io::Result<CleanPlan> {
     let Some(node) = state.find_branch_by_name(branch_name) else {
         return Ok(CleanPlan {
@@ -77,7 +104,7 @@ fn plan_for_requested_branch(
         });
     }
 
-    let evaluation = evaluate_integrated_branch(state, trunk_branch, node)?;
+    let evaluation = evaluate_integrated_branch(state, trunk_branch, node, mode)?;
 
     let (candidates, blocked) = match evaluation {
         BranchEvaluation::Cleanable(candidate) => (vec![candidate], Vec::new()),
@@ -97,6 +124,7 @@ fn plan_for_all_branches(
     state: &DigState,
     trunk_branch: &str,
     current_branch: &str,
+    mode: CleanPlanMode,
 ) -> io::Result<CleanPlan> {
     let deleted_steps = deleted_local::collect_deleted_local_steps(state, trunk_branch)?;
     let deleted_candidates = deleted_steps
@@ -110,7 +138,7 @@ fn plan_for_all_branches(
     let mut blocked = Vec::new();
 
     for node in projected_state.nodes.iter().filter(|node| !node.archived) {
-        match evaluate_integrated_branch(&projected_state, trunk_branch, node)? {
+        match evaluate_integrated_branch(&projected_state, trunk_branch, node, mode)? {
             BranchEvaluation::Cleanable(candidate) => cleanable.push(candidate),
             BranchEvaluation::Blocked(blocked_branch) => blocked.push(blocked_branch),
         }
@@ -167,6 +195,7 @@ fn evaluate_integrated_branch(
     state: &DigState,
     trunk_branch: &str,
     node: &BranchNode,
+    mode: CleanPlanMode,
 ) -> io::Result<BranchEvaluation> {
     if !git::branch_exists(&node.branch_name)? {
         return Ok(BranchEvaluation::Blocked(BlockedBranch {
@@ -203,34 +232,72 @@ fn evaluate_integrated_branch(
         }));
     }
 
-    if !branch_is_integrated(&parent_branch_name, &node.branch_name)? {
+    let local_parent_base = RestackBaseTarget::local(&parent_branch_name);
+    let tracked_pull_request_number = node.pull_request.as_ref().map(|pr| pr.number);
+    let parent_base = if branch_is_integrated_for_pull_request(
+        local_parent_base.rebase_ref(),
+        &node.branch_name,
+        tracked_pull_request_number,
+    )? {
+        local_parent_base
+    } else if mode == CleanPlanMode::RemoteAwareSync {
+        match resolve_remote_parent_base(&parent_branch_name)? {
+            Some(remote_parent_base)
+                if branch_is_integrated_for_pull_request(
+                    remote_parent_base.rebase_ref(),
+                    &node.branch_name,
+                    tracked_pull_request_number,
+                )? =>
+            {
+                remote_parent_base
+            }
+            _ => {
+                return Ok(BranchEvaluation::Blocked(BlockedBranch {
+                    branch_name: node.branch_name.clone(),
+                    reason: CleanBlockReason::NotIntegrated {
+                        parent_branch: parent_branch_name,
+                    },
+                }));
+            }
+        }
+    } else {
         return Ok(BranchEvaluation::Blocked(BlockedBranch {
             branch_name: node.branch_name.clone(),
             reason: CleanBlockReason::NotIntegrated {
                 parent_branch: parent_branch_name,
             },
         }));
-    }
+    };
 
     let restack_actions = restack::plan_after_branch_detach(
         state,
         node.id,
         &node.branch_name,
-        &parent_branch_name,
+        &parent_base,
         &node.parent,
     )?;
 
     Ok(BranchEvaluation::Cleanable(CleanCandidate {
         node_id: node.id,
         branch_name: node.branch_name.clone(),
-        parent_branch_name: parent_branch_name.clone(),
-        reason: CleanReason::IntegratedIntoParent {
-            parent_branch: parent_branch_name,
-        },
+        parent_branch_name: parent_base.branch_name.clone(),
+        reason: CleanReason::IntegratedIntoParent { parent_base },
         tree: graph.subtree(node.id)?,
         restack_plan: restack::previews_for_actions(&restack_actions),
         depth: graph.branch_depth(node.id),
     }))
+}
+
+pub(crate) fn cleanup_candidate_for_branch(
+    state: &DigState,
+    trunk_branch: &str,
+    node: &BranchNode,
+    mode: CleanPlanMode,
+) -> io::Result<Option<CleanCandidate>> {
+    match evaluate_integrated_branch(state, trunk_branch, node, mode)? {
+        BranchEvaluation::Cleanable(candidate) => Ok(Some(candidate)),
+        BranchEvaluation::Blocked(_) => Ok(None),
+    }
 }
 
 fn clean_candidate_from_deleted_step(
@@ -239,7 +306,7 @@ fn clean_candidate_from_deleted_step(
     CleanCandidate {
         node_id: step.node_id,
         branch_name: step.branch_name,
-        parent_branch_name: step.new_parent_branch_name,
+        parent_branch_name: step.new_parent_base.branch_name,
         reason: CleanReason::DeletedLocally,
         tree: step.tree,
         restack_plan: step.restack_plan,
@@ -251,11 +318,38 @@ pub(crate) fn branch_is_integrated(
     parent_branch_name: &str,
     branch_name: &str,
 ) -> io::Result<bool> {
+    branch_is_integrated_for_pull_request(parent_branch_name, branch_name, None)
+}
+
+fn branch_is_integrated_for_pull_request(
+    parent_branch_name: &str,
+    branch_name: &str,
+    tracked_pull_request_number: Option<u64>,
+) -> io::Result<bool> {
     if branch_is_integrated_by_cherry(parent_branch_name, branch_name)? {
         return Ok(true);
     }
 
-    branch_is_integrated_by_squash_message(parent_branch_name, branch_name)
+    branch_is_integrated_by_squash_message(
+        parent_branch_name,
+        branch_name,
+        tracked_pull_request_number,
+    )
+}
+
+fn resolve_remote_parent_base(parent_branch_name: &str) -> io::Result<Option<RestackBaseTarget>> {
+    let Some(target) = git::branch_push_target(parent_branch_name)? else {
+        return Ok(None);
+    };
+
+    if !git::remote_tracking_branch_exists(&target.remote_name, &target.branch_name)? {
+        return Ok(None);
+    }
+
+    Ok(Some(RestackBaseTarget::with_rebase_ref(
+        parent_branch_name,
+        git::remote_tracking_branch_ref(&target.remote_name, &target.branch_name),
+    )))
 }
 
 fn branch_is_integrated_by_cherry(parent_branch_name: &str, branch_name: &str) -> io::Result<bool> {
@@ -269,6 +363,7 @@ fn branch_is_integrated_by_cherry(parent_branch_name: &str, branch_name: &str) -
 fn branch_is_integrated_by_squash_message(
     parent_branch_name: &str,
     branch_name: &str,
+    tracked_pull_request_number: Option<u64>,
 ) -> io::Result<bool> {
     let merge_base = git::merge_base(parent_branch_name, branch_name)?;
     let branch_commits = git::commit_metadata_in_range(&format!("{merge_base}..{branch_name}"))?;
@@ -282,6 +377,9 @@ fn branch_is_integrated_by_squash_message(
 
     Ok(parent_commits.iter().any(|parent_commit| {
         parent_commit_mentions_all_branch_commits(parent_commit, &branch_commits)
+            || tracked_pull_request_number.is_some_and(|number| {
+                parent_commit_mentions_tracked_pull_request(parent_commit, number)
+            })
     }))
 }
 
@@ -306,4 +404,21 @@ pub(super) fn parent_commit_mentions_all_branch_commits(
     branch_commits
         .iter()
         .all(|branch_commit| message_lines.contains(branch_commit.subject.as_str()))
+}
+
+pub(super) fn parent_commit_mentions_tracked_pull_request(
+    parent_commit: &CommitMetadata,
+    pull_request_number: u64,
+) -> bool {
+    let tracked_pull_request_suffix = format!("(#{pull_request_number})");
+    let tracked_pull_request_ref = format!("pull request #{pull_request_number}");
+    let tracked_pull_request_url = format!("/pull/{pull_request_number}");
+    let subject = parent_commit.subject.to_ascii_lowercase();
+    let body = parent_commit.body.to_ascii_lowercase();
+
+    [subject.as_str(), body.as_str()].iter().any(|text| {
+        text.contains(&tracked_pull_request_suffix)
+            || text.contains(&tracked_pull_request_ref)
+            || text.contains(&tracked_pull_request_url)
+    })
 }

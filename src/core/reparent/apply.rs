@@ -53,7 +53,7 @@ pub(crate) fn apply(plan: &ReparentPlan) -> io::Result<ReparentOutcome> {
         node.id,
         &node.branch_name,
         &current_parent_branch_name,
-        &plan.parent_branch_name,
+        &restack::RestackBaseTarget::local(&plan.parent_branch_name),
         &plan.new_parent,
     )?;
     let restack_outcome = workflow::execute_resumable_restack_operation(

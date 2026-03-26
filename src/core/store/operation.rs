@@ -40,7 +40,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::{clear_operation, load_operation, save_operation};
-    use crate::core::restack::RestackAction;
+    use crate::core::restack::{RestackAction, RestackBaseTarget};
     use crate::core::store::dig_paths;
     use crate::core::store::{
         ParentRef, PendingCommitOperation, PendingOperationKind, PendingOperationState,
@@ -64,7 +64,7 @@ mod tests {
                 branch_name: "feat/auth-ui".into(),
                 old_upstream_branch_name: "feat/auth".into(),
                 old_upstream_oid: "old".into(),
-                new_base_branch_name: "feat/auth".into(),
+                new_base: RestackBaseTarget::local("feat/auth"),
                 new_parent: Some(ParentRef::Trunk),
             }],
         )
@@ -94,7 +94,7 @@ mod tests {
                 branch_name: "feat/auth-ui".into(),
                 old_upstream_branch_name: "feat/auth".into(),
                 old_upstream_oid: "old".into(),
-                new_base_branch_name: "feat/auth".into(),
+                new_base: RestackBaseTarget::local("feat/auth"),
                 new_parent: Some(ParentRef::Trunk),
             }],
         )
@@ -117,6 +117,7 @@ mod tests {
         let operation = PendingOperationState::start(
             PendingOperationKind::Sync(PendingSyncOperation {
                 original_branch: "feat/auth".into(),
+                remote_sync_enabled: true,
                 deleted_branches: vec!["feat/missing".into()],
                 restacked_branches: Vec::new(),
                 phase: PendingSyncPhase::RestackOutdatedLocalStacks,
@@ -127,7 +128,7 @@ mod tests {
                 branch_name: "feat/auth".into(),
                 old_upstream_branch_name: "main".into(),
                 old_upstream_oid: "old".into(),
-                new_base_branch_name: "main".into(),
+                new_base: RestackBaseTarget::local("main"),
                 new_parent: None,
             }],
         )
@@ -157,7 +158,7 @@ mod tests {
                 branch_name: "feat/auth".into(),
                 old_upstream_branch_name: "main".into(),
                 old_upstream_oid: "old".into(),
-                new_base_branch_name: "feat/platform".into(),
+                new_base: RestackBaseTarget::local("feat/platform"),
                 new_parent: Some(ParentRef::Trunk),
             }],
         )

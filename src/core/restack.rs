@@ -10,12 +10,47 @@ use crate::core::store::ParentRef;
 use crate::core::store::types::DigState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestackBaseTarget {
+    #[serde(rename = "new_base_branch_name")]
+    pub branch_name: String,
+    #[serde(
+        rename = "new_base_ref",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rebase_ref: Option<String>,
+}
+
+impl RestackBaseTarget {
+    pub fn local(branch_name: impl Into<String>) -> Self {
+        Self {
+            branch_name: branch_name.into(),
+            rebase_ref: None,
+        }
+    }
+
+    pub fn with_rebase_ref(branch_name: impl Into<String>, rebase_ref: impl Into<String>) -> Self {
+        Self {
+            branch_name: branch_name.into(),
+            rebase_ref: Some(rebase_ref.into()),
+        }
+    }
+
+    pub fn rebase_ref(&self) -> &str {
+        self.rebase_ref
+            .as_deref()
+            .unwrap_or(self.branch_name.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestackAction {
     pub node_id: Uuid,
     pub branch_name: String,
     pub old_upstream_branch_name: String,
     pub old_upstream_oid: String,
-    pub new_base_branch_name: String,
+    #[serde(flatten)]
+    pub new_base: RestackBaseTarget,
     pub new_parent: Option<ParentRef>,
 }
 
@@ -47,7 +82,7 @@ pub fn plan_after_branch_detach(
     state: &DigState,
     detached_node_id: Uuid,
     detached_branch_name: &str,
-    new_parent_branch_name: &str,
+    new_parent_base: &RestackBaseTarget,
     new_parent: &ParentRef,
 ) -> io::Result<Vec<RestackAction>> {
     let mut actions = Vec::new();
@@ -58,7 +93,7 @@ pub fn plan_after_branch_detach(
             state,
             child_id,
             detached_branch_name,
-            new_parent_branch_name,
+            new_parent_base,
             Some(new_parent.clone()),
             &mut actions,
         )?;
@@ -82,7 +117,7 @@ pub fn plan_after_branch_advance(
             child_id,
             advanced_branch_name,
             old_head_oid,
-            advanced_branch_name,
+            &RestackBaseTarget::local(advanced_branch_name),
             &mut actions,
         )?;
     }
@@ -96,16 +131,16 @@ pub fn plan_after_branch_rebase(
     rebased_branch_name: &str,
     old_upstream_oid: &str,
     old_head_oid: &str,
-    new_base_branch_name: &str,
+    new_base: &RestackBaseTarget,
 ) -> io::Result<Vec<RestackAction>> {
     load_active_branch_node(state, rebased_node_id)?;
 
     let mut actions = vec![RestackAction {
         node_id: rebased_node_id,
         branch_name: rebased_branch_name.to_string(),
-        old_upstream_branch_name: new_base_branch_name.to_string(),
+        old_upstream_branch_name: new_base.branch_name.clone(),
         old_upstream_oid: old_upstream_oid.to_string(),
-        new_base_branch_name: new_base_branch_name.to_string(),
+        new_base: new_base.clone(),
         new_parent: None,
     }];
 
@@ -116,7 +151,7 @@ pub fn plan_after_branch_rebase(
             child_id,
             rebased_branch_name,
             old_head_oid,
-            rebased_branch_name,
+            &RestackBaseTarget::local(rebased_branch_name),
             &mut actions,
         )?;
     }
@@ -129,7 +164,7 @@ pub fn plan_after_branch_reparent(
     node_id: Uuid,
     branch_name: &str,
     current_parent_branch_name: &str,
-    new_parent_branch_name: &str,
+    new_parent_base: &RestackBaseTarget,
     new_parent: &ParentRef,
 ) -> io::Result<Vec<RestackAction>> {
     load_active_branch_node(state, node_id)?;
@@ -141,7 +176,7 @@ pub fn plan_after_branch_reparent(
         branch_name: branch_name.to_string(),
         old_upstream_branch_name: current_parent_branch_name.to_string(),
         old_upstream_oid,
-        new_base_branch_name: new_parent_branch_name.to_string(),
+        new_base: new_parent_base.clone(),
         new_parent: Some(new_parent.clone()),
     }];
 
@@ -152,7 +187,7 @@ pub fn plan_after_branch_reparent(
             child_id,
             branch_name,
             &old_head_oid,
-            branch_name,
+            &RestackBaseTarget::local(branch_name),
             &mut actions,
         )?;
     }
@@ -164,7 +199,7 @@ pub fn plan_after_deleted_branch(
     state: &DigState,
     deleted_node_id: Uuid,
     deleted_branch_name: &str,
-    new_parent_branch_name: &str,
+    new_parent_base: &RestackBaseTarget,
     new_parent: &ParentRef,
 ) -> io::Result<Vec<RestackAction>> {
     let graph = BranchGraph::new(state);
@@ -172,14 +207,14 @@ pub fn plan_after_deleted_branch(
 
     for child_id in graph.active_children_ids(deleted_node_id) {
         let child = load_active_branch_node(state, child_id)?;
-        let old_upstream_oid = git::merge_base(new_parent_branch_name, &child.branch_name)?;
+        let old_upstream_oid = git::merge_base(new_parent_base.rebase_ref(), &child.branch_name)?;
         let old_head_oid = git::ref_oid(&child.branch_name)?;
         actions.push(RestackAction {
             node_id: child_id,
             branch_name: child.branch_name.clone(),
             old_upstream_branch_name: deleted_branch_name.to_string(),
             old_upstream_oid,
-            new_base_branch_name: new_parent_branch_name.to_string(),
+            new_base: new_parent_base.clone(),
             new_parent: Some(new_parent.clone()),
         });
 
@@ -189,7 +224,7 @@ pub fn plan_after_deleted_branch(
                 grandchild_id,
                 &child.branch_name,
                 &old_head_oid,
-                &child.branch_name,
+                &RestackBaseTarget::local(&child.branch_name),
                 &mut actions,
             )?;
         }
@@ -203,7 +238,7 @@ pub fn previews_for_actions(actions: &[RestackAction]) -> Vec<RestackPreview> {
         .iter()
         .map(|action| RestackPreview {
             branch_name: action.branch_name.clone(),
-            onto_branch: action.new_base_branch_name.clone(),
+            onto_branch: action.new_base.branch_name.clone(),
             parent_changed: action.new_parent.is_some(),
         })
         .collect()
@@ -218,7 +253,7 @@ where
     F: FnMut(RebaseProgress) -> io::Result<()>,
 {
     let result = git::rebase_onto_with_progress(
-        &action.new_base_branch_name,
+        action.new_base.rebase_ref(),
         &action.old_upstream_oid,
         &action.branch_name,
         on_progress,
@@ -253,7 +288,7 @@ pub fn finalize_action(
     let (old_parent, old_base_ref) = state.reparent_branch(
         action.node_id,
         new_parent.clone(),
-        action.new_base_branch_name.clone(),
+        action.new_base.branch_name.clone(),
     )?;
 
     Ok(Some(ParentChange {
@@ -262,7 +297,7 @@ pub fn finalize_action(
         old_parent,
         new_parent: new_parent.clone(),
         old_base_ref,
-        new_base_ref: action.new_base_branch_name.clone(),
+        new_base_ref: action.new_base.branch_name.clone(),
     }))
 }
 
@@ -271,7 +306,7 @@ fn collect_branch_advance_actions(
     node_id: Uuid,
     old_upstream_branch_name: &str,
     old_upstream_oid: &str,
-    new_base_branch_name: &str,
+    new_base: &RestackBaseTarget,
     actions: &mut Vec<RestackAction>,
 ) -> io::Result<()> {
     let node = load_active_branch_node(state, node_id)?;
@@ -281,7 +316,7 @@ fn collect_branch_advance_actions(
         branch_name: branch_name.clone(),
         old_upstream_branch_name: old_upstream_branch_name.to_string(),
         old_upstream_oid: old_upstream_oid.to_string(),
-        new_base_branch_name: new_base_branch_name.to_string(),
+        new_base: new_base.clone(),
         new_parent: None,
     });
 
@@ -292,7 +327,7 @@ fn collect_branch_advance_actions(
             child_id,
             &branch_name,
             &branch_head_oid,
-            &branch_name,
+            &RestackBaseTarget::local(&branch_name),
             actions,
         )?;
     }
@@ -304,7 +339,7 @@ fn collect_restack_actions(
     state: &DigState,
     node_id: Uuid,
     old_upstream_branch_name: &str,
-    new_base_branch_name: &str,
+    new_base: &RestackBaseTarget,
     new_parent: Option<ParentRef>,
     actions: &mut Vec<RestackAction>,
 ) -> io::Result<()> {
@@ -316,12 +351,19 @@ fn collect_restack_actions(
         branch_name: branch_name.clone(),
         old_upstream_branch_name: old_upstream_branch_name.to_string(),
         old_upstream_oid,
-        new_base_branch_name: new_base_branch_name.to_string(),
+        new_base: new_base.clone(),
         new_parent,
     });
 
     for child_id in BranchGraph::new(state).active_children_ids(node_id) {
-        collect_restack_actions(state, child_id, &branch_name, &branch_name, None, actions)?;
+        collect_restack_actions(
+            state,
+            child_id,
+            &branch_name,
+            &RestackBaseTarget::local(&branch_name),
+            None,
+            actions,
+        )?;
     }
 
     Ok(())
@@ -354,7 +396,8 @@ fn load_active_branch_node(
 #[cfg(test)]
 mod tests {
     use super::{
-        RestackAction, plan_after_branch_advance, plan_after_branch_reparent, previews_for_actions,
+        RestackAction, RestackBaseTarget, plan_after_branch_advance, plan_after_branch_reparent,
+        previews_for_actions,
     };
     use crate::core::git;
     use crate::core::store::types::DIG_STATE_VERSION;
@@ -370,7 +413,7 @@ mod tests {
                 branch_name: "feat/auth-api".into(),
                 old_upstream_branch_name: "feat/auth".into(),
                 old_upstream_oid: "abc123".into(),
-                new_base_branch_name: "main".into(),
+                new_base: RestackBaseTarget::local("main"),
                 new_parent: Some(ParentRef::Trunk),
             },
             RestackAction {
@@ -378,7 +421,7 @@ mod tests {
                 branch_name: "feat/auth-api-tests".into(),
                 old_upstream_branch_name: "feat/auth-api".into(),
                 old_upstream_oid: "def456".into(),
-                new_base_branch_name: "feat/auth-api".into(),
+                new_base: RestackBaseTarget::local("feat/auth-api"),
                 new_parent: None,
             },
         ]);
@@ -389,6 +432,23 @@ mod tests {
         assert_eq!(previews[1].branch_name, "feat/auth-api-tests");
         assert_eq!(previews[1].onto_branch, "feat/auth-api");
         assert!(!previews[1].parent_changed);
+    }
+
+    #[test]
+    fn keeps_logical_base_name_separate_from_rebase_ref() {
+        let action = RestackAction {
+            node_id: Uuid::new_v4(),
+            branch_name: "feat/auth-ui".into(),
+            old_upstream_branch_name: "feat/auth".into(),
+            old_upstream_oid: "abc123".into(),
+            new_base: RestackBaseTarget::with_rebase_ref("main", "origin/main"),
+            new_parent: Some(ParentRef::Trunk),
+        };
+
+        let previews = previews_for_actions(std::slice::from_ref(&action));
+
+        assert_eq!(previews[0].onto_branch, "main");
+        assert_eq!(action.new_base.rebase_ref(), "origin/main");
     }
 
     #[test]
@@ -458,7 +518,7 @@ mod tests {
             assert_eq!(planned[0].branch_name, "feat/auth-api");
             assert_eq!(planned[0].old_upstream_branch_name, "feat/auth");
             assert_eq!(planned[0].old_upstream_oid, "old-parent-head-oid");
-            assert_eq!(planned[0].new_base_branch_name, "feat/auth");
+            assert_eq!(planned[0].new_base.branch_name, "feat/auth");
             assert_eq!(planned[0].new_parent, None);
 
             assert_eq!(planned[1].node_id, grandchild_id);
@@ -468,7 +528,7 @@ mod tests {
                 planned[1].old_upstream_oid,
                 git::ref_oid("feat/auth-api").unwrap()
             );
-            assert_eq!(planned[1].new_base_branch_name, "feat/auth-api");
+            assert_eq!(planned[1].new_base.branch_name, "feat/auth-api");
             assert_eq!(planned[1].new_parent, None);
         });
     }
@@ -551,7 +611,7 @@ mod tests {
                 api_id,
                 "feat/auth-api",
                 "feat/auth",
-                "feat/platform",
+                &RestackBaseTarget::local("feat/platform"),
                 &ParentRef::Branch {
                     node_id: platform_id,
                 },
@@ -566,7 +626,7 @@ mod tests {
                 planned[0].old_upstream_oid,
                 git::merge_base("feat/auth", "feat/auth-api").unwrap()
             );
-            assert_eq!(planned[0].new_base_branch_name, "feat/platform");
+            assert_eq!(planned[0].new_base.branch_name, "feat/platform");
             assert_eq!(
                 planned[0].new_parent,
                 Some(ParentRef::Branch {
@@ -581,7 +641,7 @@ mod tests {
                 planned[1].old_upstream_oid,
                 git::ref_oid("feat/auth-api").unwrap()
             );
-            assert_eq!(planned[1].new_base_branch_name, "feat/auth-api");
+            assert_eq!(planned[1].new_base.branch_name, "feat/auth-api");
             assert_eq!(planned[1].new_parent, None);
         });
     }

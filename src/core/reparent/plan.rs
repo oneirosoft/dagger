@@ -127,7 +127,7 @@ pub(crate) fn plan(options: &ReparentOptions) -> io::Result<ReparentPlan> {
         node.id,
         &node.branch_name,
         &current_parent_branch_name,
-        parent_branch_name,
+        &restack::RestackBaseTarget::local(parent_branch_name),
         &new_parent,
     )?);
 

@@ -92,7 +92,7 @@ pub(crate) fn plan(options: &MergeOptions) -> io::Result<MergePlan> {
         &state,
         node.id,
         &node.branch_name,
-        &target_branch_name,
+        &restack::RestackBaseTarget::local(&target_branch_name),
         &node.parent,
     )?;
 

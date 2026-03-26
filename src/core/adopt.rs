@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::core::branch;
 use crate::core::git;
-use crate::core::restack::RestackAction;
+use crate::core::restack::{RestackAction, RestackBaseTarget};
 use crate::core::store::{
     BranchNode, ParentRef, PendingAdoptOperation, PendingOperationKind, PendingOperationState,
     now_unix_timestamp_secs, open_initialized, open_or_initialize, record_branch_adopted,
@@ -149,7 +149,7 @@ pub fn apply(plan: &AdoptPlan) -> io::Result<AdoptOutcome> {
                 branch_name: plan.branch_name.clone(),
                 old_upstream_branch_name: plan.parent_branch_name.clone(),
                 old_upstream_oid: plan.old_upstream_oid.clone(),
-                new_base_branch_name: plan.parent_branch_name.clone(),
+                new_base: RestackBaseTarget::local(plan.parent_branch_name.clone()),
                 new_parent: None,
             }],
             &mut |_| Ok(()),

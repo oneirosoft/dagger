@@ -164,7 +164,7 @@ fn clean_continues_paused_deleted_local_restack() {
         let operation = load_operation_json(repo).unwrap();
         assert_eq!(operation["origin"]["type"].as_str(), Some("clean"));
         assert_eq!(
-            operation["origin"]["current_candidate"]["kind"].as_str(),
+            operation["origin"]["current_candidate"]["kind"]["kind"].as_str(),
             Some("deleted_locally")
         );
 

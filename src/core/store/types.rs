@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::core::restack::{RestackAction, RestackPreview};
+use crate::core::restack::{RestackAction, RestackBaseTarget, RestackPreview};
 
 pub const DIG_STATE_VERSION: u32 = 1;
 pub const DIG_CONFIG_VERSION: u32 = 1;
@@ -149,7 +149,7 @@ impl PendingOperationState {
     pub fn advance_after_success(mut self) -> (RestackPreview, Option<Self>) {
         let preview = RestackPreview {
             branch_name: self.restack.active_action.branch_name.clone(),
-            onto_branch: self.restack.active_action.new_base_branch_name.clone(),
+            onto_branch: self.restack.active_action.new_base.branch_name.clone(),
             parent_changed: self.restack.active_action.new_parent.is_some(),
         };
         self.restack.completed_branches.push(preview.clone());
@@ -239,11 +239,11 @@ pub struct PendingCleanCandidate {
     pub kind: PendingCleanCandidateKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PendingCleanCandidateKind {
     DeletedLocally,
-    IntegratedIntoParent,
+    IntegratedIntoParent { parent_base: RestackBaseTarget },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -264,6 +264,7 @@ pub struct PendingReparentOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingSyncOperation {
     pub original_branch: String,
+    pub remote_sync_enabled: bool,
     pub deleted_branches: Vec<String>,
     pub restacked_branches: Vec<RestackPreview>,
     pub phase: PendingSyncPhase,
@@ -392,7 +393,7 @@ mod tests {
         PendingOrphanOperation, PendingReparentOperation, PendingSyncOperation, PendingSyncPhase,
         TrackedPullRequest,
     };
-    use crate::core::restack::RestackAction;
+    use crate::core::restack::{RestackAction, RestackBaseTarget};
     use uuid::Uuid;
 
     #[test]
@@ -518,7 +519,7 @@ mod tests {
             branch_name: "feature/api-followup".into(),
             old_upstream_branch_name: "feature/api".into(),
             old_upstream_oid: "abc123".into(),
-            new_base_branch_name: "feature/api".into(),
+            new_base: RestackBaseTarget::local("feature/api"),
             new_parent: None,
         };
         let second_action = RestackAction {
@@ -526,7 +527,7 @@ mod tests {
             branch_name: "feature/api-tests".into(),
             old_upstream_branch_name: "feature/api-followup".into(),
             old_upstream_oid: "def456".into(),
-            new_base_branch_name: "feature/api-followup".into(),
+            new_base: RestackBaseTarget::local("feature/api-followup"),
             new_parent: Some(ParentRef::Trunk),
         };
         let operation = PendingOperationState::start(
@@ -569,6 +570,7 @@ mod tests {
     fn reports_sync_operation_command_name() {
         let operation = PendingOperationKind::Sync(PendingSyncOperation {
             original_branch: "feature/api".into(),
+            remote_sync_enabled: true,
             deleted_branches: vec!["feature/missing".into()],
             restacked_branches: Vec::new(),
             phase: PendingSyncPhase::ReconcileDeletedLocalBranches,
