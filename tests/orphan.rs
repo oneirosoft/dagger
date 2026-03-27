@@ -20,7 +20,7 @@ fn orphans_current_branch_without_descendants_and_keeps_local_branch() {
         assert!(stdout.contains("Orphaned 'feat/auth'. It is no longer tracked by dagger."));
         assert_eq!(
             stdout.trim_end(),
-            "Orphaned 'feat/auth'. It is no longer tracked by dagger.\n\nmain"
+            "Orphaned 'feat/auth'. It is no longer tracked by dagger.\n\n* main\n\n✓ feat/auth (orphaned)"
         );
         assert_eq!(git_stdout(repo, &["branch", "--show-current"]), "feat/auth");
         assert!(git_stdout(repo, &["branch", "--list", "feat/auth"]).contains("feat/auth"));
@@ -56,7 +56,7 @@ fn orphans_named_branch_restacks_descendants_to_trunk_and_restores_original_bran
         assert!(stdout.contains("Returned to 'main' after orphaning."));
         assert!(stdout.contains("Restacked:"));
         assert!(stdout.contains("- feat/auth-ui onto main"));
-        assert!(stdout.contains("main\n└── feat/auth-ui"));
+        assert!(stdout.contains("✓ main\n└── * feat/auth-ui"));
         assert_eq!(git_stdout(repo, &["branch", "--show-current"]), "main");
         assert!(git_stdout(repo, &["branch", "--list", "feat/auth"]).contains("feat/auth"));
         assert_eq!(
@@ -91,7 +91,7 @@ fn orphans_named_branch_restacks_descendants_to_tracked_parent() {
         assert!(stdout.contains("Orphaned 'feat/auth-api'. It is no longer tracked by dagger."));
         assert!(stdout.contains("Returned to 'feat/auth' after orphaning."));
         assert!(stdout.contains("- feat/auth-api-tests onto feat/auth"));
-        assert!(stdout.contains("main\n└── ✓ feat/auth\n    └── feat/auth-api-tests"));
+        assert!(stdout.contains("* main\n└── ✓ feat/auth\n    └── * feat/auth-api-tests"));
         assert_eq!(git_stdout(repo, &["branch", "--show-current"]), "feat/auth");
         assert_eq!(
             git_stdout(repo, &["merge-base", "feat/auth", "feat/auth-api-tests"]),
@@ -158,5 +158,36 @@ fn sync_continues_paused_orphan_operation() {
         assert_eq!(child["parent"]["kind"], "trunk");
         assert!(find_archived_node(&state, "feat/auth").is_some());
         assert!(load_operation_json(repo).is_none());
+    });
+}
+
+#[test]
+fn reproduces_issue_7_orphan_tree_shows_parent_as_checked_out_after_orphan() {
+    with_temp_repo("dgr-orphan-issue-7", |repo| {
+        initialize_main_repo(repo);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/sync-progress"]);
+        commit_file(repo, "progress.txt", "progress\n", "feat: sync progress");
+        dgr_ok(repo, &["branch", "fix/sync-premature-deletion"]);
+        commit_file(repo, "fix.txt", "fix\n", "fix: sync premature deletion");
+
+        // We are on 'fix/sync-premature-deletion'. Now orphan it.
+        let output = dgr_ok(repo, &["orphan"]);
+        let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
+
+        // The bug: parent 'feat/sync-progress' is marked as current (✓) but it should be '*'
+        // and 'fix/sync-premature-deletion' should be at the bottom with '✓' and '(orphaned)' suffix.
+        assert!(stdout.contains(
+            "Orphaned 'fix/sync-premature-deletion'. It is no longer tracked by dagger."
+        ));
+
+        // This assertion is EXPECTED TO FAIL until the fix is applied.
+        // Current (buggy) output likely looks like:
+        // main
+        // └── ✓ feat/sync-progress
+
+        assert!(stdout.contains(
+            "main\n└── * feat/sync-progress\n\n✓ fix/sync-premature-deletion (orphaned)"
+        ));
     });
 }

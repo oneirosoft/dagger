@@ -340,6 +340,9 @@ mod tests {
                     },
                 ],
             }],
+            current_branch_name: Some("main".into()),
+            is_current_in_tree: true,
+            current_branch_suffix: None,
         }
     }
 

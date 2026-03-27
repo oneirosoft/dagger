@@ -22,7 +22,7 @@ fn reparents_current_branch_to_trunk_and_records_event() {
         assert!(stdout.contains("Reparented 'feat/auth-ui' onto 'main'."));
         assert!(stdout.contains("Restacked:"));
         assert!(stdout.contains("- feat/auth-ui onto main"));
-        assert!(stdout.contains("main\n└── ✓ feat/auth-ui"));
+        assert!(stdout.contains("* main\n└── ✓ feat/auth-ui"));
         assert_eq!(
             git_stdout(repo, &["branch", "--show-current"]),
             "feat/auth-ui"
@@ -73,7 +73,7 @@ fn reparents_named_branch_to_tracked_parent_and_restores_original_branch() {
         assert!(stdout.contains("Restacked:"));
         assert!(stdout.contains("- feat/auth-api onto feat/platform"));
         assert!(stdout.contains("- feat/auth-api-tests onto feat/auth-api"));
-        assert!(stdout.contains("feat/platform\n    └── ✓ feat/auth-api"));
+        assert!(stdout.contains("✓ main\n└── * feat/platform\n    └── * feat/auth-api\n        └── * feat/auth-api-tests"));
         assert_eq!(git_stdout(repo, &["branch", "--show-current"]), "main");
         assert_eq!(
             git_stdout(repo, &["merge-base", "feat/platform", "feat/auth-api"]),
