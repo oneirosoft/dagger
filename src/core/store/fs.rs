@@ -39,17 +39,34 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temp_path = parent.join(format!(".tmp-{}", Uuid::new_v4()));
     fs::write(&temp_path, bytes)?;
 
-    // On Unix, rename(2) atomically overwrites the target file.
-    // On Windows, rename fails if the target exists, so we must remove first.
-    // The Windows path has a small window where a crash loses the file.
+    // On Unix, rename(2) atomically overwrites the target — no race window.
+    // On Windows, rename fails if the target exists, so we remove first.
+    // This leaves a small crash window on Windows; a future improvement could
+    // use ReplaceFileW for full atomicity.
     #[cfg(unix)]
     {
-        fs::rename(&temp_path, path)?;
+        if let Err(e) = fs::rename(&temp_path, path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(e);
+        }
     }
 
     #[cfg(windows)]
     {
-        let _ = fs::remove_file(path);
+        if let Err(e) = fs::remove_file(path) {
+            if e.kind() != io::ErrorKind::NotFound {
+                let _ = fs::remove_file(&temp_path);
+                return Err(e);
+            }
+        }
+        if let Err(e) = fs::rename(&temp_path, path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(e);
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
         if let Err(e) = fs::rename(&temp_path, path) {
             let _ = fs::remove_file(&temp_path);
             return Err(e);
