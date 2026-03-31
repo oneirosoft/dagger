@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -41,6 +42,52 @@ impl Default for DaggerState {
 }
 
 impl DaggerState {
+    pub fn validate(&self) -> io::Result<()> {
+        if self.version != DAGGER_STATE_VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "unsupported state version {} (expected {})",
+                    self.version, DAGGER_STATE_VERSION
+                ),
+            ));
+        }
+
+        let mut seen_ids = HashSet::new();
+        let mut seen_names = HashSet::new();
+        let all_ids: HashSet<Uuid> = self.nodes.iter().map(|n| n.id).collect();
+
+        for node in &self.nodes {
+            if !seen_ids.insert(node.id) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("duplicate node id {}", node.id),
+                ));
+            }
+
+            if !node.archived && !seen_names.insert(&node.branch_name) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("duplicate active branch name '{}'", node.branch_name),
+                ));
+            }
+
+            if let ParentRef::Branch { node_id } = &node.parent {
+                if !all_ids.contains(node_id) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "branch '{}' references non-existent parent node {}",
+                            node.branch_name, node_id
+                        ),
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn find_branch_by_name(&self, branch_name: &str) -> Option<&BranchNode> {
         self.nodes
             .iter()
@@ -665,5 +712,104 @@ mod tests {
 
         assert!(serialized.contains("\"type\":\"branch_archived\""));
         assert!(serialized.contains("\"kind\":\"deleted_locally\""));
+    }
+
+    fn make_node(name: &str, parent: ParentRef) -> BranchNode {
+        BranchNode {
+            id: Uuid::new_v4(),
+            branch_name: name.into(),
+            parent,
+            base_ref: "main".into(),
+            fork_point_oid: "abc123".into(),
+            head_oid_at_creation: "abc123".into(),
+            created_at_unix_secs: 1,
+            divergence_state: BranchDivergenceState::Unknown,
+            pull_request: None,
+            archived: false,
+        }
+    }
+
+    #[test]
+    fn validates_valid_state() {
+        let parent = make_node("feature/parent", ParentRef::Trunk);
+        let child = make_node("feature/child", ParentRef::Branch { node_id: parent.id });
+
+        let state = DaggerState {
+            version: 1,
+            nodes: vec![parent, child],
+        };
+
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn validates_version_mismatch() {
+        let state = DaggerState {
+            version: 999,
+            nodes: Vec::new(),
+        };
+
+        let err = state.validate().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("unsupported state version 999"));
+    }
+
+    #[test]
+    fn validates_duplicate_node_ids() {
+        let mut a = make_node("feature/a", ParentRef::Trunk);
+        let mut b = make_node("feature/b", ParentRef::Trunk);
+        let shared_id = Uuid::new_v4();
+        a.id = shared_id;
+        b.id = shared_id;
+
+        let state = DaggerState {
+            version: 1,
+            nodes: vec![a, b],
+        };
+
+        let err = state.validate().unwrap_err();
+        assert!(err.to_string().contains("duplicate node id"));
+    }
+
+    #[test]
+    fn validates_duplicate_active_branch_names() {
+        let a = make_node("feature/dup", ParentRef::Trunk);
+        let b = make_node("feature/dup", ParentRef::Trunk);
+
+        let state = DaggerState {
+            version: 1,
+            nodes: vec![a, b],
+        };
+
+        let err = state.validate().unwrap_err();
+        assert!(err.to_string().contains("duplicate active branch name"));
+    }
+
+    #[test]
+    fn validates_dangling_parent_reference() {
+        let dangling_id = Uuid::new_v4();
+        let node = make_node("feature/orphan", ParentRef::Branch { node_id: dangling_id });
+
+        let state = DaggerState {
+            version: 1,
+            nodes: vec![node],
+        };
+
+        let err = state.validate().unwrap_err();
+        assert!(err.to_string().contains("non-existent parent node"));
+    }
+
+    #[test]
+    fn validates_archived_duplicate_names_allowed() {
+        let mut archived = make_node("feature/dup", ParentRef::Trunk);
+        archived.archived = true;
+        let active = make_node("feature/dup", ParentRef::Trunk);
+
+        let state = DaggerState {
+            version: 1,
+            nodes: vec![archived, active],
+        };
+
+        assert!(state.validate().is_ok());
     }
 }
