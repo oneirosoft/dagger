@@ -7,15 +7,24 @@ use super::types::{DAGGER_CONFIG_VERSION, DAGGER_OPERATION_VERSION, DAGGER_STATE
 /// Migrate a state JSON value from its current version to DAGGER_STATE_VERSION.
 /// Returns the migrated value, or the original if already current.
 pub fn migrate_state(mut value: Value) -> io::Result<Value> {
-    let version = value
+    let raw_version = value
         .get("version")
-        .and_then(|v| v.as_u64())
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 "state file missing 'version' field",
             )
-        })? as u32;
+        })?;
+
+    let version: u32 = raw_version
+        .as_u64()
+        .and_then(|v| v.try_into().ok())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("state file has invalid 'version' field: {}", raw_version),
+            )
+        })?;
 
     if version > DAGGER_STATE_VERSION {
         return Err(io::Error::new(
@@ -45,15 +54,24 @@ pub fn migrate_state(mut value: Value) -> io::Result<Value> {
 /// Migrate a config JSON value from its current version to DAGGER_CONFIG_VERSION.
 /// Returns the migrated value, or the original if already current.
 pub fn migrate_config(mut value: Value) -> io::Result<Value> {
-    let version = value
+    let raw_version = value
         .get("version")
-        .and_then(|v| v.as_u64())
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 "config file missing 'version' field",
             )
-        })? as u32;
+        })?;
+
+    let version: u32 = raw_version
+        .as_u64()
+        .and_then(|v| v.try_into().ok())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("config file has invalid 'version' field: {}", raw_version),
+            )
+        })?;
 
     if version > DAGGER_CONFIG_VERSION {
         return Err(io::Error::new(
@@ -77,15 +95,24 @@ pub fn migrate_config(mut value: Value) -> io::Result<Value> {
 /// Migrate an operation JSON value from its current version to DAGGER_OPERATION_VERSION.
 /// Returns the migrated value, or the original if already current.
 pub fn migrate_operation(mut value: Value) -> io::Result<Value> {
-    let version = value
+    let raw_version = value
         .get("version")
-        .and_then(|v| v.as_u64())
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 "operation file missing 'version' field",
             )
-        })? as u32;
+        })?;
+
+    let version: u32 = raw_version
+        .as_u64()
+        .and_then(|v| v.try_into().ok())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("operation file has invalid 'version' field: {}", raw_version),
+            )
+        })?;
 
     if version > DAGGER_OPERATION_VERSION {
         return Err(io::Error::new(
@@ -273,5 +300,29 @@ mod tests {
 
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("missing 'version' field"));
+    }
+
+    #[test]
+    fn state_invalid_version_type_returns_error() {
+        let input = json!({
+            "version": "not_a_number",
+            "nodes": []
+        });
+
+        let err = migrate_state(input).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("invalid 'version' field"));
+    }
+
+    #[test]
+    fn state_version_overflow_returns_error() {
+        let input = json!({
+            "version": u64::MAX,
+            "nodes": []
+        });
+
+        let err = migrate_state(input).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("invalid 'version' field"));
     }
 }
