@@ -37,3 +37,19 @@ jobs:
 
       - name: Run cargo test
         run: cargo test --locked
+
+  msrv:
+    name: MSRV Check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install minimum supported Rust version
+        uses: dtolnay/rust-toolchain@1.85
+
+      - name: Restore Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run cargo check
+        run: cargo check --locked --all-targets
