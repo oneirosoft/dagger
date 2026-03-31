@@ -23,7 +23,7 @@ reviews:
     - path: "src/cli/**"
       instructions: >
         Verify CLI layer is a thin adapter. Business logic should live in
-        src/core/. Check that error messages are user-friendly.
+        src/core/ instead. Check that error messages are user-friendly.
     - path: "**/*.rs"
       instructions: >
         Focus on Rust best practices, proper error handling, and security
