@@ -314,7 +314,7 @@ where
 
 fn abort_sync() -> io::Result<SyncOutcome> {
     let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
-    let pending_operation = load_operation(&session.paths)?
+    let _pending_operation = load_operation(&session.paths)?
         .ok_or_else(|| io::Error::other("no paused dgr operation to abort"))?;
 
     if git::is_rebase_in_progress(&session.repo) {
@@ -1655,6 +1655,7 @@ mod tests {
             let outcome = run_with_reporter(
                 &SyncOptions {
                     continue_operation: true,
+                    abort_operation: false,
                 },
                 &mut |event| {
                     events.push(event.clone());
