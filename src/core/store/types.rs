@@ -72,15 +72,38 @@ impl DaggerState {
                 ));
             }
 
-            if let ParentRef::Branch { node_id } = &node.parent {
-                if !all_ids.contains(node_id) {
+            if let ParentRef::Branch { node_id: parent_id } = &node.parent {
+                if *parent_id == node.id {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "branch '{}' references itself as parent",
+                            node.branch_name
+                        ),
+                    ));
+                }
+                if !all_ids.contains(parent_id) {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!(
                             "branch '{}' references non-existent parent node {}",
-                            node.branch_name, node_id
+                            node.branch_name, parent_id
                         ),
                     ));
+                }
+                // Warn if an active node references an archived parent
+                if !node.archived {
+                    if let Some(parent_node) = self.nodes.iter().find(|n| n.id == *parent_id) {
+                        if parent_node.archived {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!(
+                                    "active branch '{}' references archived parent '{}'",
+                                    node.branch_name, parent_node.branch_name
+                                ),
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -472,7 +495,7 @@ mod tests {
         BranchNode, BranchPullRequestTrackedEvent, BranchPullRequestTrackedSource, DaggerConfig,
         DaggerEvent, DaggerState, ParentRef, PendingCommitOperation, PendingOperationKind,
         PendingOperationState, PendingOrphanOperation, PendingReparentOperation,
-        PendingSyncOperation, PendingSyncPhase, TrackedPullRequest,
+        PendingSyncOperation, PendingSyncPhase, TrackedPullRequest, DAGGER_STATE_VERSION,
     };
     use crate::core::restack::{RestackAction, RestackBaseTarget};
     use uuid::Uuid;
@@ -735,7 +758,7 @@ mod tests {
         let child = make_node("feature/child", ParentRef::Branch { node_id: parent.id });
 
         let state = DaggerState {
-            version: 1,
+            version: DAGGER_STATE_VERSION,
             nodes: vec![parent, child],
         };
 
@@ -763,7 +786,7 @@ mod tests {
         b.id = shared_id;
 
         let state = DaggerState {
-            version: 1,
+            version: DAGGER_STATE_VERSION,
             nodes: vec![a, b],
         };
 
@@ -777,7 +800,7 @@ mod tests {
         let b = make_node("feature/dup", ParentRef::Trunk);
 
         let state = DaggerState {
-            version: 1,
+            version: DAGGER_STATE_VERSION,
             nodes: vec![a, b],
         };
 
@@ -791,7 +814,7 @@ mod tests {
         let node = make_node("feature/orphan", ParentRef::Branch { node_id: dangling_id });
 
         let state = DaggerState {
-            version: 1,
+            version: DAGGER_STATE_VERSION,
             nodes: vec![node],
         };
 
@@ -806,10 +829,40 @@ mod tests {
         let active = make_node("feature/dup", ParentRef::Trunk);
 
         let state = DaggerState {
-            version: 1,
+            version: DAGGER_STATE_VERSION,
             nodes: vec![archived, active],
         };
 
         assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn validates_self_parent_reference() {
+        let mut node = make_node("feature/self-ref", ParentRef::Trunk);
+        let self_id = node.id;
+        node.parent = ParentRef::Branch { node_id: self_id };
+
+        let state = DaggerState {
+            version: DAGGER_STATE_VERSION,
+            nodes: vec![node],
+        };
+
+        let err = state.validate().unwrap_err();
+        assert!(err.to_string().contains("references itself as parent"));
+    }
+
+    #[test]
+    fn validates_active_node_with_archived_parent() {
+        let mut parent = make_node("feature/parent", ParentRef::Trunk);
+        parent.archived = true;
+        let child = make_node("feature/child", ParentRef::Branch { node_id: parent.id });
+
+        let state = DaggerState {
+            version: DAGGER_STATE_VERSION,
+            nodes: vec![parent, child],
+        };
+
+        let err = state.validate().unwrap_err();
+        assert!(err.to_string().contains("archived parent"));
     }
 }
