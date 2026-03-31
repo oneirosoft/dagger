@@ -74,7 +74,7 @@ pub(crate) fn ensure_no_pending_operation(
 
 fn pending_operation_error(command_name: &str, paused_origin: &str) -> io::Error {
     io::Error::other(format!(
-        "dgr {command_name} cannot run while a dgr {paused_origin} operation is paused; run 'dgr sync --continue'"
+        "dgr {command_name} cannot run while a dgr {paused_origin} operation is paused; run 'dgr sync --continue' or 'dgr sync --abort'"
     ))
 }
 

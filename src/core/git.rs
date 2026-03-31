@@ -234,6 +234,14 @@ pub fn continue_rebase() -> io::Result<GitCommandOutput> {
     output_to_git_command_output(output)
 }
 
+pub fn abort_rebase() -> io::Result<GitCommandOutput> {
+    let output = Command::new("git")
+        .args(["rebase", "--abort"])
+        .output()?;
+
+    output_to_git_command_output(output)
+}
+
 pub fn init_repository() -> io::Result<ExitStatus> {
     Command::new("git").args(["init", "--quiet"]).status()
 }

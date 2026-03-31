@@ -19,8 +19,12 @@ use super::common;
 #[derive(Args, Debug, Clone, Default)]
 pub struct SyncArgs {
     /// Continue a paused restack rebase sequence
-    #[arg(short = 'c', long = "continue")]
+    #[arg(short = 'c', long = "continue", conflicts_with = "abort_operation")]
     pub continue_operation: bool,
+
+    /// Abort a paused restack rebase sequence
+    #[arg(long = "abort", conflicts_with = "continue_operation")]
+    pub abort_operation: bool,
 }
 
 pub fn execute(args: SyncArgs) -> io::Result<CommandOutcome> {
@@ -263,6 +267,13 @@ pub fn execute(args: SyncArgs) -> io::Result<CommandOutcome> {
         }
     }
 
+    if args.abort_operation && outcome.status.success() {
+        println!("Aborted paused restack operation.");
+        return Ok(CommandOutcome {
+            status: outcome.status,
+        });
+    }
+
     if !outcome.status.success() {
         if outcome.paused {
             common::print_restack_pause_guidance(outcome.failure_output.as_deref());
@@ -436,6 +447,7 @@ impl From<SyncArgs> for SyncOptions {
     fn from(args: SyncArgs) -> Self {
         Self {
             continue_operation: args.continue_operation,
+            abort_operation: args.abort_operation,
         }
     }
 }
@@ -552,8 +564,21 @@ mod tests {
     fn converts_cli_args_into_core_sync_options() {
         let options = SyncOptions::from(SyncArgs {
             continue_operation: true,
+            abort_operation: false,
         });
 
         assert!(options.continue_operation);
+        assert!(!options.abort_operation);
+    }
+
+    #[test]
+    fn converts_abort_cli_args_into_core_sync_options() {
+        let options = SyncOptions::from(SyncArgs {
+            continue_operation: false,
+            abort_operation: true,
+        });
+
+        assert!(!options.continue_operation);
+        assert!(options.abort_operation);
     }
 }
