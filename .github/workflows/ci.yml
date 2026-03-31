@@ -37,3 +37,16 @@ jobs:
 
       - name: Run cargo test
         run: cargo test --locked
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        run: cargo audit
