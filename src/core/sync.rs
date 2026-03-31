@@ -18,6 +18,7 @@ use crate::core::{adopt, commit, git, merge, orphan, reparent};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncOptions {
     pub continue_operation: bool,
+    pub abort_operation: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,6 +186,10 @@ pub fn run_with_reporter<F>(options: &SyncOptions, reporter: &mut F) -> io::Resu
 where
     F: FnMut(SyncEvent) -> io::Result<()>,
 {
+    if options.abort_operation {
+        return abort_sync();
+    }
+
     if !options.continue_operation {
         return run_full_sync_with_reporter(reporter);
     }
@@ -305,6 +310,33 @@ where
             finalize_full_sync_outcome(outcome)
         }
     }
+}
+
+fn abort_sync() -> io::Result<SyncOutcome> {
+    let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
+    let pending_operation = load_operation(&session.paths)?
+        .ok_or_else(|| io::Error::other("no paused dgr operation to abort"))?;
+
+    if git::is_rebase_in_progress(&session.repo) {
+        let abort_output = git::abort_rebase()?;
+        if !abort_output.status.success() {
+            return Ok(SyncOutcome {
+                status: abort_output.status,
+                completion: None,
+                failure_output: Some(abort_output.combined_output()),
+                paused: true,
+            });
+        }
+    }
+
+    clear_operation(&session.paths)?;
+
+    Ok(SyncOutcome {
+        status: git::success_status()?,
+        completion: None,
+        failure_output: None,
+        paused: false,
+    })
 }
 
 fn run_full_sync_with_reporter<F>(reporter: &mut F) -> io::Result<SyncOutcome>
