@@ -3,6 +3,7 @@ name = "dagger"
 version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
+rust-version = "1.85"
 
 [[bin]]
 name = "dgr"
