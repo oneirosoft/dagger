@@ -291,11 +291,7 @@ pub fn ensure_clean_worktree(command_name: &str) -> io::Result<()> {
 }
 
 pub fn ensure_no_in_progress_operations(repo: &RepoContext, command_name: &str) -> io::Result<()> {
-    let in_progress_paths = [
-        ("MERGE_HEAD", "merge"),
-        ("CHERRY_PICK_HEAD", "cherry-pick"),
-        ("REBASE_HEAD", "rebase"),
-    ];
+    let in_progress_paths = [("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick")];
 
     for (relative_path, operation_name) in in_progress_paths {
         if repo.git_dir.join(relative_path).exists() {
@@ -318,9 +314,7 @@ pub fn ensure_no_in_progress_operations(repo: &RepoContext, command_name: &str) 
 }
 
 pub fn is_rebase_in_progress(repo: &RepoContext) -> bool {
-    repo.git_dir.join("REBASE_HEAD").exists()
-        || repo.git_dir.join("rebase-merge").exists()
-        || repo.git_dir.join("rebase-apply").exists()
+    repo.git_dir.join("rebase-merge").exists() || repo.git_dir.join("rebase-apply").exists()
 }
 
 pub fn cherry_markers(
@@ -712,6 +706,26 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("rebase"));
+
+        fs::remove_dir_all(repo_git_dir).unwrap();
+    }
+
+    #[test]
+    fn ignores_standalone_rebase_head_when_checking_rebase_state() {
+        let repo_git_dir = env::temp_dir().join(format!("dgr-git-{}", Uuid::new_v4()));
+        fs::create_dir_all(&repo_git_dir).unwrap();
+        fs::write(repo_git_dir.join("REBASE_HEAD"), "deadbeef\n").unwrap();
+
+        super::ensure_no_in_progress_operations(
+            &RepoContext {
+                git_dir: PathBuf::from(&repo_git_dir),
+            },
+            "clean",
+        )
+        .unwrap();
+        assert!(!super::is_rebase_in_progress(&RepoContext {
+            git_dir: PathBuf::from(&repo_git_dir),
+        }));
 
         fs::remove_dir_all(repo_git_dir).unwrap();
     }
