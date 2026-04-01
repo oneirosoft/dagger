@@ -22,6 +22,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser, Debug)]
 #[command(name = "dgr")]
 #[command(about = "Git wrapper for stacked PR workflows")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
