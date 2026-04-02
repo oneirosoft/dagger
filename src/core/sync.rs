@@ -1900,14 +1900,14 @@ mod tests {
                             remote_name: "origin".into(),
                             branch_name: "feat/auth".into(),
                         },
-                        kind: RemotePushActionKind::CreateRemoteBranch,
+                        kind: RemotePushActionKind::Create,
                     },
                     super::RemotePushAction {
                         target: BranchPushTarget {
                             remote_name: "origin".into(),
                             branch_name: "feat/auth-ui".into(),
                         },
-                        kind: RemotePushActionKind::CreateRemoteBranch,
+                        kind: RemotePushActionKind::Create,
                     },
                 ],
             };
@@ -1927,12 +1927,12 @@ mod tests {
                     SyncStatus::PushingRemoteBranch {
                         branch_name: "feat/auth".into(),
                         remote_name: "origin".into(),
-                        kind: RemotePushActionKind::CreateRemoteBranch,
+                        kind: RemotePushActionKind::Create,
                     },
                     SyncStatus::PushingRemoteBranch {
                         branch_name: "feat/auth-ui".into(),
                         remote_name: "origin".into(),
-                        kind: RemotePushActionKind::CreateRemoteBranch,
+                        kind: RemotePushActionKind::Create,
                     },
                 ]
             );
