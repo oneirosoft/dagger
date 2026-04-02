@@ -660,6 +660,92 @@ fn sync_continues_paused_adopt_rebase() {
 }
 
 #[test]
+fn sync_ignores_stale_rebase_head_after_successful_resume() {
+    with_temp_repo("dgr-sync-cli", |repo| {
+        initialize_main_repo(repo);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
+        overwrite_file(repo, "shared.txt", "parent\n", "feat: parent");
+        git_ok(repo, &["checkout", "main"]);
+        git_ok(repo, &["checkout", "-b", "feat/auth-ui"]);
+        overwrite_file(repo, "shared.txt", "child\n", "feat: child");
+        git_ok(repo, &["checkout", "feat/auth"]);
+
+        let paused = dgr(repo, &["adopt", "feat/auth-ui", "-p", "feat/auth"]);
+        assert!(!paused.status.success());
+        assert!(load_operation_json(repo).is_some());
+
+        fs::write(repo.join("shared.txt"), "resolved\n").unwrap();
+        git_ok(repo, &["add", "shared.txt"]);
+
+        let resumed = dgr_ok(repo, &["sync", "--continue"]);
+        assert!(resumed.status.success());
+        assert!(load_operation_json(repo).is_none());
+
+        let stale_rebase_head = repo.join(".git/REBASE_HEAD");
+        fs::write(&stale_rebase_head, "deadbeef\n").unwrap();
+        assert!(stale_rebase_head.exists());
+        assert!(!repo.join(".git/rebase-merge").exists());
+        assert!(!repo.join(".git/rebase-apply").exists());
+
+        let synced = dgr_ok(repo, &["sync"]);
+        let stderr = String::from_utf8(synced.stderr).unwrap();
+
+        assert!(
+            !stderr.contains("cannot run while a git rebase is in progress"),
+            "stale REBASE_HEAD should not block sync\nstderr:\n{stderr}"
+        );
+        assert!(load_operation_json(repo).is_none());
+    });
+}
+
+#[test]
+fn sync_continues_paused_adopt_and_shows_unrelated_checked_out_branch_below_tree() {
+    with_temp_repo("dgr-sync-cli", |repo| {
+        initialize_main_repo(repo);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
+        overwrite_file(repo, "shared.txt", "parent\n", "feat: parent");
+        git_ok(repo, &["checkout", "main"]);
+        dgr_ok(repo, &["branch", "feat/billing"]);
+        commit_file(repo, "billing.txt", "billing\n", "feat: billing");
+        git_ok(repo, &["checkout", "main"]);
+        git_ok(repo, &["checkout", "-b", "feat/auth-ui"]);
+        overwrite_file(repo, "shared.txt", "child\n", "feat: child");
+        git_ok(repo, &["checkout", "feat/billing"]);
+
+        let paused = dgr(repo, &["adopt", "feat/auth-ui", "-p", "feat/auth"]);
+        assert!(!paused.status.success());
+        assert!(load_operation_json(repo).is_some());
+
+        write_file(repo, "shared.txt", "resolved\n");
+        git_ok(repo, &["add", "shared.txt"]);
+
+        let resumed = dgr_ok(repo, &["sync", "--continue"]);
+        let stdout = strip_ansi(&String::from_utf8(resumed.stdout).unwrap());
+
+        assert!(stdout.contains("Adopted 'feat/auth-ui' under 'feat/auth'."));
+        assert!(stdout.contains("Restacked 'feat/auth-ui' onto 'feat/auth'."));
+        assert!(stdout.contains("Returned to 'feat/billing' after adopt."));
+        assert!(
+            stdout.contains("* main\n└── * feat/auth\n    └── * feat/auth-ui\n\n✓ feat/billing")
+        );
+        assert_eq!(
+            git_stdout(repo, &["branch", "--show-current"]),
+            "feat/billing"
+        );
+        assert_eq!(
+            git_stdout(repo, &["merge-base", "feat/auth", "feat/auth-ui"]),
+            git_stdout(repo, &["rev-parse", "feat/auth"])
+        );
+
+        let state = load_state_json(repo);
+        assert!(find_node(&state, "feat/auth-ui").is_some());
+        assert!(load_operation_json(repo).is_none());
+    });
+}
+
+#[test]
 fn sync_continues_paused_merge_and_preserves_delete_prompt() {
     with_temp_repo("dgr-sync-cli", |repo| {
         initialize_main_repo(repo);

@@ -180,13 +180,46 @@ pub fn rebase_onto_with_progress<F>(
     new_base: &str,
     old_upstream: &str,
     branch_name: &str,
+    on_progress: F,
+) -> io::Result<GitCommandOutput>
+where
+    F: FnMut(RebaseProgress) -> io::Result<()>,
+{
+    run_rebase_with_progress(
+        Command::new("git").args(["rebase", "--onto", new_base, old_upstream, branch_name]),
+        on_progress,
+    )
+}
+
+pub fn continue_rebase_with_progress<F>(on_progress: F) -> io::Result<GitCommandOutput>
+where
+    F: FnMut(RebaseProgress) -> io::Result<()>,
+{
+    run_rebase_with_progress(
+        Command::new("git")
+            .env("GIT_EDITOR", "true")
+            .args(["rebase", "--continue"]),
+        on_progress,
+    )
+}
+
+pub fn continue_rebase() -> io::Result<GitCommandOutput> {
+    let output = Command::new("git")
+        .env("GIT_EDITOR", "true")
+        .args(["rebase", "--continue"])
+        .output()?;
+
+    output_to_git_command_output(output)
+}
+
+fn run_rebase_with_progress<F>(
+    command: &mut Command,
     mut on_progress: F,
 ) -> io::Result<GitCommandOutput>
 where
     F: FnMut(RebaseProgress) -> io::Result<()>,
 {
-    let mut child = Command::new("git")
-        .args(["rebase", "--onto", new_base, old_upstream, branch_name])
+    let mut child = command
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -225,15 +258,6 @@ where
     })
 }
 
-pub fn continue_rebase() -> io::Result<GitCommandOutput> {
-    let output = Command::new("git")
-        .env("GIT_EDITOR", "true")
-        .args(["rebase", "--continue"])
-        .output()?;
-
-    output_to_git_command_output(output)
-}
-
 pub fn init_repository() -> io::Result<ExitStatus> {
     Command::new("git").args(["init", "--quiet"]).status()
 }
@@ -267,11 +291,7 @@ pub fn ensure_clean_worktree(command_name: &str) -> io::Result<()> {
 }
 
 pub fn ensure_no_in_progress_operations(repo: &RepoContext, command_name: &str) -> io::Result<()> {
-    let in_progress_paths = [
-        ("MERGE_HEAD", "merge"),
-        ("CHERRY_PICK_HEAD", "cherry-pick"),
-        ("REBASE_HEAD", "rebase"),
-    ];
+    let in_progress_paths = [("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick")];
 
     for (relative_path, operation_name) in in_progress_paths {
         if repo.git_dir.join(relative_path).exists() {
@@ -294,9 +314,7 @@ pub fn ensure_no_in_progress_operations(repo: &RepoContext, command_name: &str) 
 }
 
 pub fn is_rebase_in_progress(repo: &RepoContext) -> bool {
-    repo.git_dir.join("REBASE_HEAD").exists()
-        || repo.git_dir.join("rebase-merge").exists()
-        || repo.git_dir.join("rebase-apply").exists()
+    repo.git_dir.join("rebase-merge").exists() || repo.git_dir.join("rebase-apply").exists()
 }
 
 pub fn cherry_markers(
@@ -656,8 +674,23 @@ mod tests {
     };
     use std::env;
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
+    use std::path::Path;
     use std::path::PathBuf;
+    #[cfg(unix)]
+    use std::process::Command;
     use uuid::Uuid;
+
+    #[cfg(unix)]
+    fn write_executable(path: &Path, script: &str) {
+        fs::write(path, script).unwrap();
+
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
 
     #[test]
     fn reports_in_progress_rebase_state() {
@@ -673,6 +706,26 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("rebase"));
+
+        fs::remove_dir_all(repo_git_dir).unwrap();
+    }
+
+    #[test]
+    fn ignores_standalone_rebase_head_when_checking_rebase_state() {
+        let repo_git_dir = env::temp_dir().join(format!("dgr-git-{}", Uuid::new_v4()));
+        fs::create_dir_all(&repo_git_dir).unwrap();
+        fs::write(repo_git_dir.join("REBASE_HEAD"), "deadbeef\n").unwrap();
+
+        super::ensure_no_in_progress_operations(
+            &RepoContext {
+                git_dir: PathBuf::from(&repo_git_dir),
+            },
+            "clean",
+        )
+        .unwrap();
+        assert!(!super::is_rebase_in_progress(&RepoContext {
+            git_dir: PathBuf::from(&repo_git_dir),
+        }));
 
         fs::remove_dir_all(repo_git_dir).unwrap();
     }
@@ -710,6 +763,47 @@ mod tests {
                 total: 7,
             })
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parses_continue_rebase_progress_from_streamed_git_output() {
+        let temp_dir = env::temp_dir().join(format!("dgr-git-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let git_path = temp_dir.join("git");
+        write_executable(
+            &git_path,
+            "#!/bin/sh\nprintf 'Rebasing (1/3)\\r' >&2\nsleep 0.1\nprintf 'Rebasing (2/3)\\r' >&2\nsleep 0.1\nprintf 'Rebasing (2/3)\\rSuccessfully rebased\\n' >&2\nexit 0\n",
+        );
+
+        let mut seen = Vec::new();
+        let output = super::run_rebase_with_progress(
+            Command::new(&git_path).args(["rebase", "--continue"]),
+            |progress| {
+                seen.push(progress);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(output.status.success());
+        assert_eq!(
+            seen,
+            vec![
+                RebaseProgress {
+                    current: 1,
+                    total: 3,
+                },
+                RebaseProgress {
+                    current: 2,
+                    total: 3,
+                },
+            ]
+        );
+        assert!(output.stderr.contains("Successfully rebased"));
+
+        fs::remove_dir_all(temp_dir).unwrap();
     }
 
     #[test]

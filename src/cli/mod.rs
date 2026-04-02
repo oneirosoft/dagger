@@ -9,6 +9,7 @@ mod operation;
 mod orphan;
 mod pr;
 mod reparent;
+mod switch;
 mod sync;
 mod tree;
 
@@ -21,6 +22,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser, Debug)]
 #[command(name = "dgr")]
 #[command(about = "Git wrapper for stacked PR workflows")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -58,6 +60,9 @@ enum Commands {
     /// Continue a paused restack sequence
     Sync(sync::SyncArgs),
 
+    /// Switch to a branch directly or choose one from the tracked tree
+    Switch(switch::SwitchArgs),
+
     /// Print the tracked branch stacks as a shared tree from trunk
     Tree(tree::TreeArgs),
 }
@@ -81,6 +86,7 @@ pub fn run() -> ExitCode {
         Commands::Pr(args) => pr::execute(args),
         Commands::Reparent(args) => reparent::execute(args),
         Commands::Sync(args) => sync::execute(args),
+        Commands::Switch(args) => switch::execute(args),
         Commands::Tree(args) => tree::execute(args),
     };
 
