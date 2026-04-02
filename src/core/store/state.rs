@@ -10,8 +10,10 @@ pub fn load_state(paths: &DaggerPaths) -> io::Result<DaggerState> {
     }
 
     let bytes = fs::read(&paths.state_file)?;
-    let state = serde_json::from_slice(&bytes)
+    let state: DaggerState = serde_json::from_slice(&bytes)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+
+    state.validate()?;
 
     Ok(state)
 }
