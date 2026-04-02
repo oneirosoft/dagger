@@ -88,20 +88,9 @@ impl DaggerState {
                         ),
                     ));
                 }
-                // Warn if an active node references an archived parent
-                if !node.archived {
-                    if let Some(parent_node) = self.nodes.iter().find(|n| n.id == *parent_id) {
-                        if parent_node.archived {
-                            return Err(io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                format!(
-                                    "active branch '{}' references archived parent '{}'",
-                                    node.branch_name, parent_node.branch_name
-                                ),
-                            ));
-                        }
-                    }
-                }
+                // Note: an active node referencing an archived parent is a valid
+                // intermediate state that the sync command is designed to repair.
+                // We intentionally do not reject it here.
             }
         }
 
@@ -855,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    fn validates_active_node_with_archived_parent() {
+    fn validates_active_node_with_archived_parent_is_allowed() {
         let mut parent = make_node("feature/parent", ParentRef::Trunk);
         parent.archived = true;
         let child = make_node("feature/child", ParentRef::Branch { node_id: parent.id });
@@ -865,7 +854,8 @@ mod tests {
             nodes: vec![parent, child],
         };
 
-        let err = state.validate().unwrap_err();
-        assert!(err.to_string().contains("archived parent"));
+        // An active node referencing an archived parent is a valid intermediate
+        // state that sync is designed to repair, so validation must accept it.
+        assert!(state.validate().is_ok());
     }
 }
