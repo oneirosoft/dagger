@@ -7,7 +7,7 @@
 # Add "dependency-audit" as a required status check in branch protection.
 #
 # Pinned tool versions (update deliberately):
-#   govulncheck v1.1.4 | cargo-audit 0.21.1 | pip-audit 2.9.0
+#   govulncheck v1.1.4 | cargo-audit 0.22.1 | pip-audit 2.9.0
 name: Dependency audit
 
 on:
@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       npm: ${{ steps.check.outputs.npm }}
+      pnpm: ${{ steps.check.outputs.pnpm }}
       gomod: ${{ steps.check.outputs.gomod }}
       cargo: ${{ steps.check.outputs.cargo }}
       pip: ${{ steps.check.outputs.pip }}
@@ -39,6 +40,13 @@ jobs:
             echo "npm=true" >> "$GITHUB_OUTPUT"
           else
             echo "npm=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # pnpm — look for pnpm-lock.yaml anywhere
+          if find . -name 'pnpm-lock.yaml' -not -path '*/node_modules/*' | grep -q .; then
+            echo "pnpm=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pnpm=false" >> "$GITHUB_OUTPUT"
           fi
 
           # Go modules — detect via go.mod (not go.sum, which may not exist)
@@ -88,6 +96,34 @@ jobs:
           done < <(find . -name 'package-lock.json' -not -path '*/node_modules/*' -exec dirname {} \;)
           exit $status
 
+  audit-pnpm:
+    name: pnpm audit
+    needs: detect
+    if: needs.detect.outputs.pnpm == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "lts/*"
+          cache: "pnpm"
+
+      - name: Audit pnpm dependencies
+        run: |
+          # Audit each pnpm-lock.yaml found in the repo
+          status=0
+          while IFS= read -r dir; do
+            echo "::group::pnpm audit $dir"
+            if ! (cd "$dir" && pnpm audit --audit-level low); then
+              status=1
+            fi
+            echo "::endgroup::"
+          done < <(find . -name 'pnpm-lock.yaml' -not -path '*/node_modules/*' -exec dirname {} \;)
+          exit $status
+
   audit-go:
     name: govulncheck
     needs: detect
@@ -126,7 +162,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit@0.21.1 --locked
+        run: cargo install cargo-audit@0.22.1 --locked
 
       - name: Audit Cargo dependencies
         run: |
