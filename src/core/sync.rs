@@ -1853,6 +1853,11 @@ mod tests {
             install_fake_executable(&bin_dir, "gh", &script);
             fs::write(&log_path, "").unwrap();
             let _path_guard = EnvVarGuard::set("PATH", path_with_prepend(&bin_dir));
+            // On Windows, Command::new("gh") only resolves gh.exe, not gh.cmd.
+            // Point DAGGER_GH_BIN at the .cmd wrapper so gh_program() uses it directly.
+            #[cfg(windows)]
+            let _gh_bin_guard =
+                EnvVarGuard::set("DAGGER_GH_BIN", bin_dir.join("gh.cmd").display().to_string());
 
             let plan = PullRequestUpdatePlan {
                 actions: vec![
