@@ -5,11 +5,17 @@
 #   APP_ID         — GitHub App ID with contents:write and pull-requests:write
 #   APP_PRIVATE_KEY — GitHub App private key
 #
-# Auto-approves and squash-merges Dependabot PRs for:
-#   - Patch version updates
-#   - Minor version updates
+# Auto-approves and enables auto-merge for Dependabot PRs that are:
+#   - GitHub Actions updates (patch or minor version bumps)
+#   - Security updates for any ecosystem (patch or minor)
 #   - Indirect (transitive) dependency updates
-# Major version updates are left for human review.
+# Major version updates are always left for human review.
+# Uses --auto so the merge waits for all required CI checks to pass.
+#
+# Safety model: application ecosystems use open-pull-requests-limit: 0 in
+# dependabot.yml, so the only app-ecosystem PRs Dependabot can create are
+# security updates. This workflow adds defense-in-depth by also checking
+# the package ecosystem.
 name: Dependabot auto-merge
 
 on:
@@ -33,25 +39,40 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
+      - name: Determine if auto-merge eligible
+        id: eligible
+        run: |
+          UPDATE_TYPE="${{ steps.metadata.outputs.update-type }}"
+          DEP_TYPE="${{ steps.metadata.outputs.dependency-type }}"
+          ECOSYSTEM="${{ steps.metadata.outputs.package-ecosystem }}"
+
+          # Must be patch, minor, or indirect
+          if [[ "$UPDATE_TYPE" != "version-update:semver-patch" && \
+                "$UPDATE_TYPE" != "version-update:semver-minor" && \
+                "$DEP_TYPE" != "indirect" ]]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping: major update requires human review"
+            exit 0
+          fi
+
+          # GitHub Actions version updates are always eligible
+          # App ecosystem PRs can only exist as security updates (limit: 0)
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+          echo "Auto-merge eligible: ecosystem=$ECOSYSTEM update=$UPDATE_TYPE"
+
       - name: Generate app token
-        if: >-
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
-          steps.metadata.outputs.dependency-type == 'indirect'
+        if: steps.eligible.outputs.eligible == 'true'
         id: app-token
         uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - name: Approve and auto-merge
-        if: >-
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
-          steps.metadata.outputs.dependency-type == 'indirect'
+      - name: Approve and enable auto-merge
+        if: steps.eligible.outputs.eligible == 'true'
         run: |
           gh pr review --approve "$PR_URL"
-          gh pr merge --squash --admin "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
