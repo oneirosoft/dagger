@@ -37,6 +37,19 @@ fn clear_log(path: &str) {
     fs::write(path, "").unwrap();
 }
 
+/// Read the gh log file and normalize it for cross-platform comparison.
+/// On Windows, `echo %*` in `.cmd` scripts preserves literal quote characters
+/// around arguments and appends a trailing space after the last argument.
+/// This helper strips quotes and trims each line so assertions work on both
+/// Unix and Windows.
+fn read_gh_log(path: &str) -> String {
+    let raw = fs::read_to_string(path).unwrap();
+    raw.lines()
+        .map(|line| line.replace('"', "").trim().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn track_pull_request_number(repo: &Path, branch_name: &str, number: u64) {
     let state_path = repo.join(".git/.dagger/state.json");
     let mut state = load_state_json(repo);
@@ -137,7 +150,7 @@ exit /b 1
                 && event["source"].as_str() == Some("created")
         }));
 
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert!(
             gh_log.contains("pr list --head feat/auth --state open --json number,baseRefName,url")
         );
@@ -203,7 +216,7 @@ exit /b 1
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
 
         assert!(stdout.contains("Retargeted child pull requests:"));
         assert!(stdout.contains("- #124 for feat/auth-ui to main"));
@@ -277,7 +290,7 @@ exit /b 1
             1
         );
 
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert!(gh_log.contains("pr create --base feat/auth"));
     });
 }
@@ -339,7 +352,7 @@ exit /b 1
             1
         );
 
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert!(
             gh_log.contains("pr create --base main --title feat-auth --body feat-auth --draft")
         );
@@ -401,7 +414,7 @@ exit /b 1
                 && event["source"].as_str() == Some("adopted")
         }));
 
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert!(!gh_log.contains("pr create"));
     });
 }
@@ -475,7 +488,7 @@ exit /b 1
 
         assert!(stdout.contains("Branch 'feat/auth' already tracks pull request #456."));
 
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert_eq!(gh_log.lines().count(), 3);
     });
 }
@@ -548,7 +561,7 @@ exit /b 1
         );
 
         assert!(String::from_utf8(output.stdout).unwrap().trim().is_empty());
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert_eq!(gh_log.trim(), "pr view 456 --web");
     });
 }
@@ -616,7 +629,7 @@ exit /b 1
             1
         );
 
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert_eq!(
             gh_log.lines().collect::<Vec<_>>(),
             vec![
@@ -696,7 +709,7 @@ exit /b 1
         );
         assert!(remote_ref.contains("refs/heads/feat/auth"));
 
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert_eq!(
             gh_log.lines().collect::<Vec<_>>(),
             vec![
@@ -764,10 +777,7 @@ exit /b 1
             .is_empty()
         );
         assert_eq!(
-            fs::read_to_string(log_path)
-                .unwrap()
-                .lines()
-                .collect::<Vec<_>>(),
+            read_gh_log(&log_path).lines().collect::<Vec<_>>(),
             vec!["pr list --head feat/auth --state open --json number,baseRefName,url"]
         );
     });
@@ -803,6 +813,7 @@ echo "unexpected gh args: $*" >&2
 exit 1
 "#,
             r#"@echo off
+setlocal enabledelayedexpansion
 echo %* >> "%DGR_TEST_GH_LOG%"
 if "%1"=="pr" if "%2"=="list" (
   echo []
@@ -810,11 +821,11 @@ if "%1"=="pr" if "%2"=="list" (
 )
 if "%1"=="pr" if "%2"=="create" (
   for /f "delims=" %%b in ('git branch --show-current') do set "CURRENT_BRANCH=%%b"
-  if "%CURRENT_BRANCH%"=="feat/auth" (
+  if "!CURRENT_BRANCH!"=="feat/auth" (
     echo https://github.com/oneirosoft/dagger/pull/101
     exit /b 0
   )
-  if "%CURRENT_BRANCH%"=="feat/auth-ui" (
+  if "!CURRENT_BRANCH!"=="feat/auth-ui" (
     echo https://github.com/oneirosoft/dagger/pull/102
     exit /b 0
   )
@@ -926,7 +937,7 @@ exit /b 1
             &bin_dir,
             "gh",
             if cfg!(windows) {
-                "@echo off\r\necho %* >> \"%DGR_TEST_GH_LOG%\"\r\nif \"%1\"==\"pr\" if \"%2\"==\"list\" (\r\n  for /f \"delims=\" %%b in ('git branch --show-current') do set \"CURRENT_BRANCH=%%b\"\r\n  if \"%CURRENT_BRANCH%\"==\"feat/auth-ui\" if \"%3\"==\"--head\" (\r\n    echo []\r\n    exit /b 0\r\n  )\r\n  echo [{\"number\":301,\"title\":\"Auth PR\",\"url\":\"https://github.com/oneirosoft/dagger/pull/301\"},{\"number\":302,\"title\":\"Auth UI PR\",\"url\":\"https://github.com/oneirosoft/dagger/pull/302\"}]\r\n  exit /b 0\r\n)\r\nif \"%1\"==\"pr\" if \"%2\"==\"create\" (\r\n  echo https://github.com/oneirosoft/dagger/pull/302\r\n  exit /b 0\r\n)\r\nif \"%1\"==\"pr\" if \"%2\"==\"view\" if \"%4\"==\"--web\" (\r\n  exit /b 0\r\n)\r\necho unexpected gh args: %* 1>&2\r\nexit /b 1\r\n"
+                "@echo off\r\nsetlocal enabledelayedexpansion\r\necho %* >> \"%DGR_TEST_GH_LOG%\"\r\nif \"%1\"==\"pr\" if \"%2\"==\"list\" (\r\n  for /f \"delims=\" %%b in ('git branch --show-current') do set \"CURRENT_BRANCH=%%b\"\r\n  if \"!CURRENT_BRANCH!\"==\"feat/auth-ui\" if \"%3\"==\"--head\" (\r\n    echo []\r\n    exit /b 0\r\n  )\r\n  echo [{\"number\":301,\"title\":\"Auth PR\",\"url\":\"https://github.com/oneirosoft/dagger/pull/301\"},{\"number\":302,\"title\":\"Auth UI PR\",\"url\":\"https://github.com/oneirosoft/dagger/pull/302\"}]\r\n  exit /b 0\r\n)\r\nif \"%1\"==\"pr\" if \"%2\"==\"create\" (\r\n  echo https://github.com/oneirosoft/dagger/pull/302\r\n  exit /b 0\r\n)\r\nif \"%1\"==\"pr\" if \"%2\"==\"view\" if \"%4\"==\"--web\" (\r\n  exit /b 0\r\n)\r\necho unexpected gh args: %* 1>&2\r\nexit /b 1\r\n"
             } else {
                 "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> \"$DGR_TEST_GH_LOG\"\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\n  current_branch=\"$(git branch --show-current)\"\n  if [ \"$current_branch\" = \"feat/auth-ui\" ] && [ \"$3\" = \"--head\" ]; then\n    printf '[]\\n'\n    exit 0\n  fi\n  printf '[{\"number\":301,\"title\":\"Auth PR\",\"url\":\"https://github.com/oneirosoft/dagger/pull/301\"},{\"number\":302,\"title\":\"Auth UI PR\",\"url\":\"https://github.com/oneirosoft/dagger/pull/302\"}]\\n'\n  exit 0\nfi\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"create\" ]; then\n  printf 'https://github.com/oneirosoft/dagger/pull/302\\n'\n  exit 0\nfi\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ] && [ \"$4\" = \"--web\" ]; then\n  exit 0\nfi\necho \"unexpected gh args: $*\" >&2\nexit 1\n"
             },
@@ -963,10 +974,7 @@ exit /b 1
         );
 
         assert_eq!(
-            fs::read_to_string(log_path)
-                .unwrap()
-                .lines()
-                .collect::<Vec<_>>(),
+            read_gh_log(&log_path).lines().collect::<Vec<_>>(),
             vec![
                 "pr list --state open --json number,title,url",
                 "pr view 301 --web",
@@ -1048,7 +1056,10 @@ fn pr_reports_missing_gh_cli() {
 
         assert!(!output.status.success());
         let stderr = String::from_utf8(output.stderr).unwrap();
-        assert!(stderr.contains("gh CLI is not installed or not found on PATH"));
+        assert!(
+            stderr.contains("gh CLI is not installed or not found on PATH"),
+            "expected 'gh CLI is not installed' error, got: {stderr}"
+        );
     });
 }
 
@@ -1126,7 +1137,7 @@ exit /b 1
         assert!(!stderr.contains("Usage:"));
         assert!(!stderr.contains("Flags:"));
 
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert!(
             gh_log.contains("pr create --base main --title feat-auth --body feat-auth --draft")
         );
