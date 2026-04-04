@@ -1,5 +1,4 @@
 # Dependabot auto-merge workflow
-# Copy to .github/workflows/dependabot-automerge.yml
 #
 # Requires repository secrets:
 #   APP_ID         — GitHub App ID with contents:write and pull-requests:write

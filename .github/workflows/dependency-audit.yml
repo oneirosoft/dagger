@@ -1,5 +1,4 @@
 # Dependency vulnerability audit
-# Copy to .github/workflows/dependency-audit.yml
 #
 # Auto-detects ecosystems present in the repository and runs the appropriate
 # audit tool. Fails the build if any dependency has a known security advisory.
