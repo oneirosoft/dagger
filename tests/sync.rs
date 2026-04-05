@@ -36,15 +36,41 @@ fn clone_origin(repo: &Path, clone_name: &str) -> PathBuf {
     clone_dir
 }
 
-fn install_fake_gh(repo: &Path, script: &str) -> (String, String) {
+fn install_fake_gh(
+    repo: &Path,
+    unix_script: &str,
+    windows_script: &str,
+) -> (PathBuf, String, String, String) {
     let bin_dir = repo.join(".git").join("fake-bin");
+    let script = if cfg!(windows) {
+        windows_script
+    } else {
+        unix_script
+    };
     install_fake_executable(&bin_dir, "gh", script);
 
     let path = path_with_prepend(&bin_dir);
     let log_path = repo.join(".git").join("gh.log");
     fs::write(&log_path, "").unwrap();
+    let gh_bin = bin_dir
+        .join(if cfg!(windows) { "gh.cmd" } else { "gh" })
+        .display()
+        .to_string();
 
-    (path, log_path.display().to_string())
+    (bin_dir, path, log_path.display().to_string(), gh_bin)
+}
+
+/// Read the gh log file and normalize it for cross-platform comparison.
+/// On Windows, `echo %*` in `.cmd` scripts preserves literal quote characters
+/// around arguments and appends a trailing space after the last argument.
+/// This helper strips quotes and trims each line so assertions work on both
+/// Unix and Windows.
+fn read_gh_log(path: &str) -> String {
+    let raw = fs::read_to_string(path).unwrap();
+    raw.lines()
+        .map(|line| line.replace('"', "").trim().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn install_remote_update_logger(repo: &Path) -> String {
@@ -942,7 +968,7 @@ fn sync_repairs_closed_child_pull_request_after_remote_parent_branch_deletion() 
         );
         track_pull_request_number(repo, "feat/auth-ui", 234);
 
-        let (path, log_path) = install_fake_gh(
+        let (_, path, log_path, gh_bin) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
@@ -963,6 +989,24 @@ fi
 echo "unexpected gh args: $*" >&2
 exit 1
 "#,
+            r#"@echo off
+echo %* >> "%DGR_TEST_GH_LOG%"
+if "%1"=="pr" if "%2"=="view" if "%3"=="234" (
+  echo {"number":234,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/234"}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="reopen" if "%3"=="234" (
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="ready" if "%3"=="234" if "%4"=="--undo" (
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="edit" if "%3"=="234" if "%4"=="--base" if "%5"=="main" (
+  exit /b 0
+)
+echo unexpected gh args: %* 1>&2
+exit /b 1
+"#,
         );
 
         let output = dgr_with_input_and_env(
@@ -972,6 +1016,7 @@ exit 1
             &[
                 ("PATH", path.as_str()),
                 ("DGR_TEST_GH_LOG", log_path.as_str()),
+                ("DAGGER_GH_BIN", gh_bin.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -988,7 +1033,7 @@ exit 1
         assert!(stdout.contains("Merged branches ready to clean:"));
         assert!(stdout.contains("- feat/auth-ui onto main"));
 
-        let gh_log = fs::read_to_string(log_path).unwrap();
+        let gh_log = read_gh_log(&log_path);
         assert!(gh_log.contains(
             "pr view 234 --json number,state,mergedAt,baseRefName,headRefName,headRefOid,isDraft,url"
         ));
@@ -1027,7 +1072,7 @@ fn sync_repairs_multiple_child_pull_requests_with_one_temporary_parent_restore()
         track_pull_request_number(repo, "feat/auth-ui", 222);
         let remote_update_log = install_remote_update_logger(repo);
 
-        let (path, gh_log_path) = install_fake_gh(
+        let (_, path, gh_log_path, gh_bin) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
@@ -1052,6 +1097,28 @@ fi
 echo "unexpected gh args: $*" >&2
 exit 1
 "#,
+            r#"@echo off
+echo %* >> "%DGR_TEST_GH_LOG%"
+if "%1"=="pr" if "%2"=="view" if "%3"=="111" (
+  echo {"number":111,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-api","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/111"}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="view" if "%3"=="222" (
+  echo {"number":222,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/222"}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="reopen" (
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="ready" if "%4"=="--undo" (
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="edit" if "%4"=="--base" if "%5"=="main" (
+  exit /b 0
+)
+echo unexpected gh args: %* 1>&2
+exit /b 1
+"#,
         );
 
         let output = dgr_with_input_and_env(
@@ -1061,6 +1128,7 @@ exit 1
             &[
                 ("PATH", path.as_str()),
                 ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DAGGER_GH_BIN", gh_bin.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -1076,7 +1144,7 @@ exit 1
             2
         );
 
-        let gh_log = fs::read_to_string(gh_log_path).unwrap();
+        let gh_log = read_gh_log(&gh_log_path);
         assert_eq!(gh_log.matches("pr reopen ").count(), 2);
         assert_eq!(gh_log.matches("pr ready ").count(), 2);
         assert_eq!(gh_log.matches("pr edit ").count(), 2);
@@ -1106,7 +1174,7 @@ fn sync_skips_pull_request_repair_for_open_merged_or_retargeted_children() {
         track_pull_request_number(repo, "feat/auth-tests", 303);
         let remote_update_log = install_remote_update_logger(repo);
 
-        let (path, gh_log_path) = install_fake_gh(
+        let (_, path, gh_log_path, gh_bin) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
@@ -1129,6 +1197,26 @@ fi
 echo "unexpected gh args: $*" >&2
 exit 1
 "#,
+            r#"@echo off
+echo %* >> "%DGR_TEST_GH_LOG%"
+if "%1"=="pr" if "%2"=="view" if "%3"=="301" (
+  echo {"number":301,"state":"OPEN","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-api","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/301"}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="view" if "%3"=="302" (
+  echo {"number":302,"state":"CLOSED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/302"}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="view" if "%3"=="303" (
+  echo {"number":303,"state":"CLOSED","mergedAt":null,"baseRefName":"main","headRefName":"feat/auth-tests","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/303"}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="edit" if "%3"=="301" if "%4"=="--base" if "%5"=="main" (
+  exit /b 0
+)
+echo unexpected gh args: %* 1>&2
+exit /b 1
+"#,
         );
 
         let output = dgr_with_input_and_env(
@@ -1138,6 +1226,7 @@ exit 1
             &[
                 ("PATH", path.as_str()),
                 ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DAGGER_GH_BIN", gh_bin.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -1149,7 +1238,7 @@ exit 1
         );
         assert!(!stdout.contains("Recovered pull requests:"));
 
-        let gh_log = fs::read_to_string(gh_log_path).unwrap();
+        let gh_log = read_gh_log(&gh_log_path);
         assert!(gh_log.contains("pr view 301"));
         assert!(gh_log.contains("pr view 302"));
         assert!(gh_log.contains("pr view 303"));
@@ -1201,7 +1290,7 @@ fn sync_repairs_closed_child_pull_request_when_parent_branch_is_missing_locally(
         set_branch_archived(repo, "feat/root", true);
 
         let remote_update_log = install_remote_update_logger(repo);
-        let (path, gh_log_path) = install_fake_gh(
+        let (_, path, gh_log_path, gh_bin) = install_fake_gh(
             repo,
             &format!(
                 r#"#!/bin/sh
@@ -1228,6 +1317,30 @@ echo "unexpected gh args: $*" >&2
 exit 1
 "#
             ),
+            &format!(
+                r#"@echo off
+echo %* >> "%DGR_TEST_GH_LOG%"
+if "%1"=="pr" if "%2"=="view" if "%3"=="102" (
+  echo {{"number":102,"state":"MERGED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/root","headRefName":"feat/auth","headRefOid":"{parent_head_oid}","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/102"}}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="view" if "%3"=="103" (
+  echo {{"number":103,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/103"}}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="reopen" if "%3"=="103" (
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="ready" if "%3"=="103" if "%4"=="--undo" (
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="edit" if "%3"=="103" if "%4"=="--base" if "%5"=="main" (
+  exit /b 0
+)
+echo unexpected gh args: %* 1>&2
+exit /b 1
+"#
+            ),
         );
 
         let output = dgr_with_input_and_env(
@@ -1237,6 +1350,7 @@ exit 1
             &[
                 ("PATH", path.as_str()),
                 ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DAGGER_GH_BIN", gh_bin.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -1255,7 +1369,7 @@ exit 1
         assert!(stdout.contains("Restacked:"));
         assert!(stdout.contains("- feat/auth-ui onto main"));
 
-        let gh_log = fs::read_to_string(gh_log_path).unwrap();
+        let gh_log = read_gh_log(&gh_log_path);
         assert!(gh_log.contains("pr view 102 --json"));
         assert!(gh_log.contains("pr view 103 --json"));
         assert!(gh_log.contains("pr reopen 103"));
@@ -1318,7 +1432,7 @@ fn sync_removes_local_parent_branch_after_repair_when_parent_was_merged_upstream
         set_branch_archived(repo, "feat/root", true);
 
         let remote_update_log = install_remote_update_logger(repo);
-        let (path, gh_log_path) = install_fake_gh(
+        let (_, path, gh_log_path, gh_bin) = install_fake_gh(
             repo,
             &format!(
                 r#"#!/bin/sh
@@ -1345,6 +1459,30 @@ echo "unexpected gh args: $*" >&2
 exit 1
 "#
             ),
+            &format!(
+                r#"@echo off
+echo %* >> "%DGR_TEST_GH_LOG%"
+if "%1"=="pr" if "%2"=="view" if "%3"=="102" (
+  echo {{"number":102,"state":"MERGED","mergedAt":"2026-03-26T12:00:00Z","baseRefName":"feat/root","headRefName":"feat/auth","headRefOid":"{parent_head_oid}","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/102"}}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="view" if "%3"=="103" (
+  echo {{"number":103,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/103"}}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="reopen" if "%3"=="103" (
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="ready" if "%3"=="103" if "%4"=="--undo" (
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="edit" if "%3"=="103" if "%4"=="--base" if "%5"=="main" (
+  exit /b 0
+)
+echo unexpected gh args: %* 1>&2
+exit /b 1
+"#
+            ),
         );
 
         let output = dgr_with_input_and_env(
@@ -1354,6 +1492,7 @@ exit 1
             &[
                 ("PATH", path.as_str()),
                 ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DAGGER_GH_BIN", gh_bin.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
@@ -1389,7 +1528,7 @@ fn sync_aborts_before_local_cleanup_when_pull_request_repair_fails() {
         );
         track_pull_request_number(repo, "feat/auth-ui", 234);
 
-        let (path, gh_log_path) = install_fake_gh(
+        let (_, path, gh_log_path, gh_bin) = install_fake_gh(
             repo,
             r#"#!/bin/sh
 set -eu
@@ -1405,6 +1544,19 @@ fi
 echo "unexpected gh args: $*" >&2
 exit 1
 "#,
+            r#"@echo off
+echo %* >> "%DGR_TEST_GH_LOG%"
+if "%1"=="pr" if "%2"=="view" if "%3"=="234" (
+  echo {"number":234,"state":"CLOSED","mergedAt":null,"baseRefName":"feat/auth","headRefName":"feat/auth-ui","isDraft":false,"url":"https://github.com/oneirosoft/dagger/pull/234"}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="reopen" if "%3"=="234" (
+  echo boom 1>&2
+  exit /b 1
+)
+echo unexpected gh args: %* 1>&2
+exit /b 1
+"#,
         );
 
         let output = dgr_with_env(
@@ -1413,6 +1565,7 @@ exit 1
             &[
                 ("PATH", path.as_str()),
                 ("DGR_TEST_GH_LOG", gh_log_path.as_str()),
+                ("DAGGER_GH_BIN", gh_bin.as_str()),
             ],
         );
         let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
