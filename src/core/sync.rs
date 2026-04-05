@@ -314,8 +314,10 @@ where
 
 fn abort_sync() -> io::Result<SyncOutcome> {
     let session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
-    let _pending_operation = load_operation(&session.paths)?
-        .ok_or_else(|| io::Error::other("no paused dgr operation to abort"))?;
+
+    if load_operation(&session.paths)?.is_none() {
+        return Err(io::Error::other("no paused dgr operation to abort"));
+    }
 
     if git::is_rebase_in_progress(&session.repo) {
         let abort_output = git::abort_rebase()?;
@@ -1378,6 +1380,7 @@ mod tests {
         pull_request_needs_repair, run, run_with_reporter,
     };
     use crate::core::gh::{PullRequestState, PullRequestStatus};
+    use crate::core::store::load_operation;
     use crate::core::test_support::{
         append_file, commit_file, create_tracked_branch, git_ok, initialize_main_repo,
         with_temp_repo,
@@ -1677,6 +1680,65 @@ mod tests {
                         .iter()
                         .any(|branch| branch.branch_name == "feat/auth")
             ));
+        });
+    }
+
+    #[test]
+    fn abort_cancels_paused_sync_and_clears_pending_operation() {
+        with_temp_repo("dgr-sync-abort", |repo| {
+            initialize_main_repo(repo);
+            crate::core::init::run(&crate::core::init::InitOptions::default()).unwrap();
+            create_tracked_branch("feat/auth");
+            commit_file(repo, "auth.txt", "auth\n", "feat: auth");
+            create_tracked_branch("feat/auth-ui");
+            commit_file(repo, "shared.txt", "child\n", "feat: ui");
+            git_ok(repo, &["checkout", "main"]);
+            commit_file(repo, "shared.txt", "main\n", "feat: trunk");
+            git_ok(repo, &["checkout", "feat/auth"]);
+
+            // Trigger a conflict so sync pauses
+            let paused = run(&SyncOptions::default()).unwrap();
+            assert!(!paused.status.success());
+            assert!(paused.paused);
+
+            // Verify a pending operation exists
+            let session =
+                crate::core::store::open_initialized("should be initialized").unwrap();
+            assert!(load_operation(&session.paths).unwrap().is_some());
+
+            // Abort the paused sync
+            let outcome = run(&SyncOptions {
+                continue_operation: false,
+                abort_operation: true,
+            })
+            .unwrap();
+
+            assert!(outcome.status.success());
+            assert!(!outcome.paused);
+
+            // Verify the pending operation has been cleared
+            assert!(load_operation(&session.paths).unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn abort_returns_error_when_no_pending_operation() {
+        with_temp_repo("dgr-sync-abort-no-op", |repo| {
+            initialize_main_repo(repo);
+            crate::core::init::run(&crate::core::init::InitOptions::default()).unwrap();
+
+            let result = run(&SyncOptions {
+                continue_operation: false,
+                abort_operation: true,
+            });
+
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("no paused dgr operation to abort")
+            );
         });
     }
 }
