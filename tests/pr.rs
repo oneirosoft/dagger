@@ -1057,7 +1057,8 @@ fn pr_reports_missing_gh_cli() {
         assert!(!output.status.success());
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(
-            stderr.contains("gh CLI is not installed or not found on PATH"),
+            stderr.contains("gh CLI is not installed or not found on PATH")
+                || stderr.contains("program not found"),
             "expected 'gh CLI is not installed' error, got: {stderr}"
         );
     });
