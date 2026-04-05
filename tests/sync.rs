@@ -1,6 +1,8 @@
 mod support;
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
@@ -76,11 +78,33 @@ fn read_gh_log(path: &str) -> String {
 fn install_remote_update_logger(repo: &Path) -> String {
     let hooks_dir = repo.join(".git").join("origin.git").join("hooks");
     let log_path = repo.join(".git").join("origin-updates.log");
+
+    // Git hooks are always executed by git's built-in shell (even on Windows
+    // where Git for Windows uses its bundled MSYS2 bash).  The hook file must
+    // be named exactly "update" without any extension — using
+    // install_fake_executable would produce "update.cmd" on Windows, which git
+    // does not recognise as a hook.
+    //
+    // On Windows the log path uses backslashes which the POSIX shell inside Git
+    // for Windows cannot handle in double-quoted strings (they are interpreted
+    // as escape characters).  Convert to forward slashes so the path works in
+    // both environments.
+    let log_path_for_shell = log_path.display().to_string().replace('\\', "/");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s %s %s\\n' \"$1\" \"$2\" \"$3\" >> \"{}\"\n",
-        log_path.display()
+        "#!/bin/sh\nset -eu\nprintf '%s %s %s\\n' \"$1\" \"$2\" \"$3\" >> \"{log_path_for_shell}\"\n",
     );
-    install_fake_executable(&hooks_dir, "update", &script);
+    fs::create_dir_all(&hooks_dir).unwrap();
+    let hook_path = hooks_dir.join("update");
+    fs::write(&hook_path, script).unwrap();
+
+    // On Unix the hook must be executable.
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&hook_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&hook_path, perms).unwrap();
+    }
+
     fs::write(&log_path, "").unwrap();
 
     log_path.display().to_string()
