@@ -326,7 +326,7 @@ fn abort_sync() -> io::Result<SyncOutcome> {
                 status: abort_output.status,
                 completion: None,
                 failure_output: Some(abort_output.combined_output()),
-                paused: true,
+                paused: false,
             });
         }
     }
