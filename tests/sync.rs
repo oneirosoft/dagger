@@ -106,7 +106,12 @@ fn setup_remotely_merged_root_branch_with_local_trunk_advance(repo: &Path) {
     dgr_ok(repo, &["branch", "feat/auth-ui"]);
     commit_file(repo, "ui.txt", "ui\n", "feat: ui");
     git_ok(repo, &["checkout", "main"]);
-    overwrite_file(repo, "README.md", "root\nlocal trunk\n", "feat: local trunk follow-up");
+    overwrite_file(
+        repo,
+        "README.md",
+        "root\nlocal trunk\n",
+        "feat: local trunk follow-up",
+    );
 
     let remote_repo = clone_origin(repo, "origin-worktree");
     git_ok(&remote_repo, &["checkout", "main"]);
@@ -141,7 +146,12 @@ fn setup_remotely_merged_root_branch_with_children(
     }
 
     git_ok(repo, &["checkout", "main"]);
-    overwrite_file(repo, "README.md", "root\nlocal trunk\n", "feat: local trunk follow-up");
+    overwrite_file(
+        repo,
+        "README.md",
+        "root\nlocal trunk\n",
+        "feat: local trunk follow-up",
+    );
 
     let remote_repo = clone_origin(repo, "origin-worktree");
     git_ok(&remote_repo, &["checkout", "main"]);
