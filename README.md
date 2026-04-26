@@ -99,6 +99,8 @@ dgr pr list --view
 dgr init                        # initialize dagger in the current directory
 dgr branch <name>               # create a tracked branch from the current branch
 dgr branch <name> -p <parent>   # create a tracked branch under a specific parent
+dgr branch --delete <branch>    # delete a tracked branch and restack its children
+dgr branch -D <branch>          # alias for branch --delete
 dgr switch <branch>             # switch directly to a local branch
 dgr switch                      # choose a tracked branch from the interactive tree
 dgr tree                        # show the full tracked branch tree
@@ -160,7 +162,7 @@ When dagger creates a pull request, it prints both the creation summary and the 
 
 ### Resolve paused commands
 
-Some commands, including `dgr commit`, `dgr adopt`, `dgr reparent`, `dgr merge`, `dgr clean`, `dgr orphan`, and `dgr sync`, may pause if `dagger` hits a rebase conflict while restacking tracked descendants.
+Some commands, including `dgr commit`, `dgr adopt`, `dgr branch --delete`, `dgr reparent`, `dgr merge`, `dgr clean`, `dgr orphan`, and `dgr sync`, may pause if `dagger` hits a rebase conflict while restacking tracked descendants.
 
 When that happens:
 

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::MutexGuard;
 
-use crate::core::branch::{self, BranchOptions};
+use crate::core::branch::{self, BranchOptions, CreateBranchOptions};
 
 pub(crate) fn with_temp_repo(prefix: &str, test: impl FnOnce(&Path)) {
     let guard: MutexGuard<'_, ()> = crate::core::test_cwd_lock().lock().unwrap();
@@ -37,10 +37,10 @@ pub(crate) fn initialize_main_repo(repo: &Path) {
 }
 
 pub(crate) fn create_tracked_branch(branch_name: &str) {
-    branch::run(&BranchOptions {
+    branch::run(&BranchOptions::Create(CreateBranchOptions {
         name: branch_name.into(),
         parent_branch_name: None,
-    })
+    }))
     .unwrap();
 }
 

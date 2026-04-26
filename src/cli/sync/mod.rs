@@ -62,6 +62,17 @@ pub fn execute(args: SyncArgs) -> io::Result<CommandOutcome> {
                     println!("{output}");
                 }
             }
+            SyncCompletion::BranchDelete(delete_outcome) if delete_outcome.status.success() => {
+                let rendered_tree = super::tree::render_focused_context_tree(
+                    &delete_outcome.parent_branch_name,
+                    None,
+                )?;
+                let output =
+                    super::branch::format_delete_success_output(delete_outcome, &rendered_tree);
+                if !output.is_empty() {
+                    println!("{output}");
+                }
+            }
             SyncCompletion::Merge(merge_outcome) if merge_outcome.outcome.status.success() => {
                 let deleted_branch_name = if super::merge::confirm_delete_merged_branch(
                     &merge_outcome.source_branch_name,

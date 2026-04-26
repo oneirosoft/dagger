@@ -197,6 +197,7 @@ pub struct PendingRestackState {
 pub enum PendingOperationKind {
     Commit(PendingCommitOperation),
     Adopt(PendingAdoptOperation),
+    BranchDelete(PendingBranchDeleteOperation),
     Merge(PendingMergeOperation),
     Clean(PendingCleanOperation),
     Orphan(PendingOrphanOperation),
@@ -209,6 +210,7 @@ impl PendingOperationKind {
         match self {
             Self::Commit(_) => "commit",
             Self::Adopt(_) => "adopt",
+            Self::BranchDelete(_) => "branch",
             Self::Merge(_) => "merge",
             Self::Clean(_) => "clean",
             Self::Orphan(_) => "orphan",
@@ -231,6 +233,14 @@ pub struct PendingAdoptOperation {
     pub branch_name: String,
     pub parent_branch_name: String,
     pub parent: ParentRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingBranchDeleteOperation {
+    pub original_branch: String,
+    pub branch_name: String,
+    pub parent_branch_name: String,
+    pub node_id: Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -374,6 +384,7 @@ pub enum BranchArchiveReason {
     IntegratedIntoParent { parent_branch: String },
     Orphaned,
     DeletedLocally,
+    DeletedByUser,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -423,9 +434,9 @@ mod tests {
     use super::{
         BranchAdoptedEvent, BranchArchiveReason, BranchArchivedEvent, BranchDivergenceState,
         BranchNode, BranchPullRequestTrackedEvent, BranchPullRequestTrackedSource, DaggerConfig,
-        DaggerEvent, DaggerState, ParentRef, PendingCommitOperation, PendingOperationKind,
-        PendingOperationState, PendingOrphanOperation, PendingReparentOperation,
-        PendingSyncOperation, PendingSyncPhase, TrackedPullRequest,
+        DaggerEvent, DaggerState, ParentRef, PendingBranchDeleteOperation, PendingCommitOperation,
+        PendingOperationKind, PendingOperationState, PendingOrphanOperation,
+        PendingReparentOperation, PendingSyncOperation, PendingSyncPhase, TrackedPullRequest,
     };
     use crate::core::restack::{RestackAction, RestackBaseTarget};
     use uuid::Uuid;
@@ -628,6 +639,18 @@ mod tests {
     }
 
     #[test]
+    fn reports_branch_delete_operation_command_name() {
+        let operation = PendingOperationKind::BranchDelete(PendingBranchDeleteOperation {
+            original_branch: "main".into(),
+            branch_name: "feature/api".into(),
+            parent_branch_name: "main".into(),
+            node_id: Uuid::nil(),
+        });
+
+        assert_eq!(operation.command_name(), "branch");
+    }
+
+    #[test]
     fn reports_sync_operation_command_name() {
         let operation = PendingOperationKind::Sync(PendingSyncOperation {
             original_branch: "feature/api".into(),
@@ -665,5 +688,20 @@ mod tests {
 
         assert!(serialized.contains("\"type\":\"branch_archived\""));
         assert!(serialized.contains("\"kind\":\"deleted_locally\""));
+    }
+
+    #[test]
+    fn serializes_deleted_by_user_branch_archive_event() {
+        let event = DaggerEvent::BranchArchived(BranchArchivedEvent {
+            occurred_at_unix_secs: 1,
+            branch_id: Uuid::nil(),
+            branch_name: "feature/api".into(),
+            reason: BranchArchiveReason::DeletedByUser,
+        });
+
+        let serialized = serde_json::to_string(&event).unwrap();
+
+        assert!(serialized.contains("\"type\":\"branch_archived\""));
+        assert!(serialized.contains("\"kind\":\"deleted_by_user\""));
     }
 }
