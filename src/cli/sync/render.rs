@@ -334,6 +334,10 @@ fn format_branch_text(branch_name: &str, pull_request_number: Option<u64>) -> St
 fn format_status_text(status: &SyncStatus) -> String {
     match status {
         SyncStatus::FetchingRemotes => "Fetching remotes".to_string(),
+        SyncStatus::RefreshingTrunk {
+            branch_name,
+            remote_name,
+        } => format!("Refreshing {branch_name} from {remote_name}"),
         SyncStatus::RepairingClosedPullRequests => "Repairing closed pull requests".to_string(),
         SyncStatus::RemovingMergedLocalBranches => "Removing merged local branches".to_string(),
         SyncStatus::ReconcilingDeletedLocalBranch { step_branch_name } => {
@@ -529,6 +533,23 @@ mod tests {
         assert_eq!(
             render_active_frame(Some((&SyncStatus::FetchingRemotes, 0)), None),
             "\u{1b}[38;5;208mFetching remotes\u{1b}[0m \u{1b}[38;5;208m|\u{1b}[0m"
+        );
+    }
+
+    #[test]
+    fn renders_trunk_refresh_status_bar() {
+        assert_eq!(
+            render_active_frame(
+                Some((
+                    &SyncStatus::RefreshingTrunk {
+                        branch_name: "main".into(),
+                        remote_name: "origin".into(),
+                    },
+                    0
+                )),
+                None,
+            ),
+            "\u{1b}[38;5;208mRefreshing main from origin\u{1b}[0m \u{1b}[38;5;208m|\u{1b}[0m"
         );
     }
 

@@ -106,12 +106,7 @@ fn setup_remotely_merged_root_branch_with_local_trunk_advance(repo: &Path) {
     dgr_ok(repo, &["branch", "feat/auth-ui"]);
     commit_file(repo, "ui.txt", "ui\n", "feat: ui");
     git_ok(repo, &["checkout", "main"]);
-    overwrite_file(
-        repo,
-        "shared.txt",
-        "local trunk\n",
-        "feat: local trunk follow-up",
-    );
+    overwrite_file(repo, "README.md", "root\nlocal trunk\n", "feat: local trunk follow-up");
 
     let remote_repo = clone_origin(repo, "origin-worktree");
     git_ok(&remote_repo, &["checkout", "main"]);
@@ -146,12 +141,7 @@ fn setup_remotely_merged_root_branch_with_children(
     }
 
     git_ok(repo, &["checkout", "main"]);
-    overwrite_file(
-        repo,
-        "shared.txt",
-        "local trunk\n",
-        "feat: local trunk follow-up",
-    );
+    overwrite_file(repo, "README.md", "root\nlocal trunk\n", "feat: local trunk follow-up");
 
     let remote_repo = clone_origin(repo, "origin-worktree");
     git_ok(&remote_repo, &["checkout", "main"]);
@@ -864,6 +854,100 @@ fn sync_aborts_before_local_restack_when_fetch_fails() {
             git_stdout(repo, &["rev-parse", "main"])
         );
         assert!(load_operation_json(repo).is_none());
+    });
+}
+
+#[test]
+fn sync_refreshes_local_trunk_before_restacking_local_only_branch() {
+    with_temp_repo("dgr-sync-cli", |repo| {
+        initialize_main_repo(repo);
+        initialize_origin_remote(repo);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
+        commit_file(repo, "auth.txt", "auth\n", "feat: auth");
+
+        let remote_repo = clone_origin(repo, "origin-worktree-local-only");
+        git_ok(&remote_repo, &["checkout", "main"]);
+        commit_file(
+            &remote_repo,
+            "README.md",
+            "root\nremote main\n",
+            "feat: remote main follow-up",
+        );
+        git_ok(&remote_repo, &["push", "origin", "main"]);
+
+        let output = dgr_with_input(repo, &["sync"], "n\n");
+        let stdout = strip_ansi(&String::from_utf8(output.stdout).unwrap());
+
+        assert!(output.status.success());
+        assert!(stdout.contains("Restacked:"));
+        assert!(stdout.contains("- feat/auth onto main"));
+        assert!(stdout.contains("Remote branches to update:"));
+        assert!(stdout.contains("- create feat/auth on origin"));
+        assert!(stdout.contains("Push these remote updates? [y/N]"));
+        assert!(stdout.contains("Skipped remote updates."));
+        assert_eq!(
+            git_stdout(repo, &["rev-parse", "main"]),
+            git_stdout(repo, &["rev-parse", "origin/main"])
+        );
+        assert_eq!(
+            git_stdout(repo, &["merge-base", "main", "feat/auth"]),
+            git_stdout(repo, &["rev-parse", "main"])
+        );
+        assert_eq!(git_stdout(repo, &["branch", "--show-current"]), "feat/auth");
+
+        let state = load_state_json(repo);
+        let branch = find_node(&state, "feat/auth").unwrap();
+        assert_eq!(branch["base_ref"], "main");
+        assert_eq!(branch["parent"]["kind"], "trunk");
+    });
+}
+
+#[test]
+fn sync_aborts_before_local_restack_when_trunk_pull_rebase_conflicts() {
+    with_temp_repo("dgr-sync-cli", |repo| {
+        initialize_main_repo(repo);
+        initialize_origin_remote(repo);
+        dgr_ok(repo, &["init"]);
+        dgr_ok(repo, &["branch", "feat/auth"]);
+        commit_file(repo, "auth.txt", "auth\n", "feat: auth");
+        git_ok(repo, &["checkout", "main"]);
+        overwrite_file(
+            repo,
+            "README.md",
+            "local main\n",
+            "feat: local trunk follow-up",
+        );
+
+        let remote_repo = clone_origin(repo, "origin-worktree-diverged-main");
+        git_ok(&remote_repo, &["checkout", "main"]);
+        overwrite_file(
+            &remote_repo,
+            "README.md",
+            "remote main\n",
+            "feat: remote trunk follow-up",
+        );
+        git_ok(&remote_repo, &["push", "origin", "main"]);
+        git_ok(repo, &["checkout", "feat/auth"]);
+        let feature_head_before_sync = git_stdout(repo, &["rev-parse", "feat/auth"]);
+
+        let output = dgr(repo, &["sync"]);
+        let stderr = String::from_utf8(output.stderr).unwrap();
+
+        assert!(!output.status.success());
+        assert!(stderr.contains("git pull --rebase 'origin' 'main' failed"));
+        assert_eq!(git_stdout(repo, &["branch", "--show-current"]), "feat/auth");
+        assert_eq!(
+            git_stdout(repo, &["rev-parse", "feat/auth"]),
+            feature_head_before_sync
+        );
+        assert_ne!(
+            git_stdout(repo, &["rev-parse", "main"]),
+            git_stdout(repo, &["rev-parse", "origin/main"])
+        );
+        assert!(load_operation_json(repo).is_none());
+        assert!(!repo.join(".git/rebase-merge").exists());
+        assert!(!repo.join(".git/rebase-apply").exists());
     });
 }
 
@@ -1593,7 +1677,7 @@ fn sync_continues_paused_remote_cleanup_with_stored_remote_rebase_target() {
         assert_eq!(
             operation["origin"]["current_candidate"]["kind"]["parent_base"]["new_base_ref"]
                 .as_str(),
-            Some("origin/main")
+            None
         );
 
         std::fs::write(repo.join("conflict.txt"), "resolved\n").unwrap();
@@ -1609,6 +1693,10 @@ fn sync_continues_paused_remote_cleanup_with_stored_remote_rebase_target() {
         assert!(stdout.contains("- feat/auth-ui onto main"));
         assert_eq!(
             git_stdout(repo, &["merge-base", "origin/main", "feat/auth-ui"]),
+            git_stdout(repo, &["rev-parse", "origin/main"])
+        );
+        assert_eq!(
+            git_stdout(repo, &["rev-parse", "main"]),
             git_stdout(repo, &["rev-parse", "origin/main"])
         );
 

@@ -41,6 +41,10 @@ pub enum SyncStage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncStatus {
     FetchingRemotes,
+    RefreshingTrunk {
+        branch_name: String,
+        remote_name: String,
+    },
     RepairingClosedPullRequests,
     RemovingMergedLocalBranches,
     ReconcilingDeletedLocalBranch {
@@ -395,8 +399,10 @@ where
     workflow::ensure_ready_for_operation(&session.repo, "sync")?;
     workflow::ensure_no_pending_operation(&session.paths, "sync")?;
     clean::reconcile_branch_divergence_state(&mut session)?;
+    let original_branch = git::current_branch_name()?;
     reporter(SyncEvent::StatusChanged(SyncStatus::FetchingRemotes))?;
     let remote_sync_enabled = fetch_sync_remotes(&session)?;
+    refresh_trunk_before_sync(&session, &original_branch, reporter)?;
     let repaired_pull_requests = if remote_sync_enabled {
         reporter(SyncEvent::StatusChanged(
             SyncStatus::RepairingClosedPullRequests,
@@ -405,7 +411,6 @@ where
     } else {
         Vec::new()
     };
-    let original_branch = git::current_branch_name()?;
     if remote_sync_enabled {
         reporter(SyncEvent::StatusChanged(
             SyncStatus::RemovingMergedLocalBranches,
@@ -1295,6 +1300,98 @@ fn fetch_sync_remotes(session: &crate::core::store::StoreSession) -> io::Result<
     Ok(true)
 }
 
+fn refresh_trunk_before_sync<F>(
+    session: &crate::core::store::StoreSession,
+    original_branch: &str,
+    reporter: &mut F,
+) -> io::Result<()>
+where
+    F: FnMut(SyncEvent) -> io::Result<()>,
+{
+    let trunk_branch = &session.config.trunk_branch;
+    if !git::branch_exists(trunk_branch)? {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("trunk branch '{}' does not exist", trunk_branch),
+        ));
+    }
+
+    let Some(remote_name) = git::branch_remote_name(trunk_branch)? else {
+        return Ok(());
+    };
+
+    reporter(SyncEvent::StatusChanged(SyncStatus::RefreshingTrunk {
+        branch_name: trunk_branch.clone(),
+        remote_name: remote_name.clone(),
+    }))?;
+
+    let pull_output =
+        workflow::pull_branch_with_rebase(trunk_branch, &remote_name).map_err(|error| {
+            preflight_sync_error(
+                &session.repo,
+                original_branch,
+                format!(
+                    "failed to refresh trunk '{}' from '{}': {}",
+                    trunk_branch, remote_name, error
+                ),
+            )
+        })?;
+
+    if pull_output.status.success() {
+        return Ok(());
+    }
+
+    let combined_output = pull_output.combined_output();
+    let message = if combined_output.is_empty() {
+        format!("git pull --rebase '{remote_name}' '{trunk_branch}' failed")
+    } else {
+        format!("git pull --rebase '{remote_name}' '{trunk_branch}' failed: {combined_output}")
+    };
+
+    Err(preflight_sync_error(
+        &session.repo,
+        original_branch,
+        message,
+    ))
+}
+
+fn preflight_sync_error(
+    repo: &git::RepoContext,
+    original_branch: &str,
+    message: String,
+) -> io::Error {
+    let mut detail = message;
+
+    if git::is_rebase_in_progress(repo) {
+        match git::abort_rebase() {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                let combined_output = output.combined_output();
+                detail = if combined_output.is_empty() {
+                    format!("{detail}\nfailed to abort trunk refresh rebase")
+                } else {
+                    format!("{detail}\nfailed to abort trunk refresh rebase: {combined_output}")
+                };
+            }
+            Err(error) => {
+                detail = format!("{detail}\nfailed to abort trunk refresh rebase: {}", error);
+            }
+        }
+    }
+
+    match workflow::restore_original_branch_if_needed(original_branch) {
+        Ok(Some(outcome)) if !outcome.status.success() => io::Error::other(format!(
+            "{detail}\nfailed to return to '{}'",
+            original_branch
+        )),
+        Err(error) => io::Error::other(format!(
+            "{detail}\nfailed to return to '{}': {}",
+            original_branch, error
+        )),
+        _ => io::Error::other(detail),
+    }
+}
+
 pub fn plan_remote_pushes(
     restacked_branch_names: &[String],
     excluded_branch_names: &[String],
@@ -1798,6 +1895,18 @@ mod tests {
                     matches!(event, SyncEvent::StatusChanged(SyncStatus::FetchingRemotes))
                 })
                 .unwrap();
+            let refresh_index = events
+                .iter()
+                .position(|event| {
+                    matches!(
+                        event,
+                        SyncEvent::StatusChanged(SyncStatus::RefreshingTrunk {
+                            branch_name,
+                            remote_name,
+                        }) if branch_name == "main" && remote_name == "origin"
+                    )
+                })
+                .unwrap();
             let repair_index = events
                 .iter()
                 .position(|event| {
@@ -1823,7 +1932,8 @@ mod tests {
                 })
                 .unwrap();
 
-            assert!(fetch_index < repair_index);
+            assert!(fetch_index < refresh_index);
+            assert!(refresh_index < repair_index);
             assert!(repair_index < prune_index);
             assert!(prune_index < stage_index);
         });
