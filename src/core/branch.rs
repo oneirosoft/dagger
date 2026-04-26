@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::core::git;
 use crate::core::graph::BranchGraph;
 use crate::core::graph::BranchLineageNode;
-use crate::core::restack::{self, RestackPreview};
+use crate::core::restack::{self, RestackAction, RestackPreview};
 use crate::core::store::types::DaggerState;
 use crate::core::store::{
     BranchArchiveReason, BranchDivergenceState, BranchNode, DaggerConfig, ParentRef,
@@ -64,6 +64,52 @@ pub struct DeleteBranchOutcome {
     pub restored_original_branch: Option<String>,
     pub failure_output: Option<String>,
     pub paused: bool,
+}
+
+impl DeleteBranchOutcome {
+    fn paused(
+        completion: PendingBranchDeleteOperation,
+        restack_outcome: workflow::ResumableRestackExecutionOutcome,
+    ) -> Self {
+        Self {
+            status: restack_outcome.status,
+            branch_name: completion.branch_name,
+            parent_branch_name: completion.parent_branch_name,
+            restacked_branches: restack_outcome.restacked_branches,
+            restored_original_branch: None,
+            failure_output: restack_outcome.failure_output,
+            paused: true,
+        }
+    }
+
+    fn delete_failed(
+        completion: &PendingBranchDeleteOperation,
+        status: ExitStatus,
+        restacked_branches: Vec<RestackPreview>,
+    ) -> Self {
+        Self {
+            status,
+            branch_name: completion.branch_name.clone(),
+            parent_branch_name: completion.parent_branch_name.clone(),
+            restacked_branches,
+            restored_original_branch: None,
+            failure_output: None,
+            paused: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DeleteBranchPlan {
+    completion: PendingBranchDeleteOperation,
+    restack_actions: Vec<RestackAction>,
+}
+
+#[derive(Debug)]
+struct RestoreOriginalBranchOutcome {
+    status: ExitStatus,
+    restored_original_branch: Option<String>,
+    failure_output: Option<String>,
 }
 
 pub fn run(options: &BranchOptions) -> io::Result<BranchOutcome> {
@@ -159,119 +205,20 @@ fn create_branch(options: &CreateBranchOptions) -> io::Result<CreateBranchOutcom
 
 fn delete_branch(options: &DeleteBranchOptions) -> io::Result<DeleteBranchOutcome> {
     workflow::ensure_no_pending_operation_for_command("branch")?;
-    let branch_name = resolve_delete_branch_name(&options.branch_name)?;
     let original_branch = git::current_branch_name()?;
     let mut session = open_initialized("dagger is not initialized; run 'dgr init' first")?;
     workflow::ensure_ready_for_operation(&session.repo, "branch")?;
     workflow::ensure_no_pending_operation(&session.paths, "branch")?;
 
-    if branch_name == session.config.trunk_branch {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "cannot delete trunk branch '{}'",
-                session.config.trunk_branch
-            ),
-        ));
-    }
-
-    if !git::branch_exists(&branch_name)? {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("branch '{}' does not exist", branch_name),
-        ));
-    }
-
-    let node = session
-        .state
-        .find_branch_by_name(&branch_name)
-        .cloned()
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("branch '{}' is not tracked by dagger", branch_name),
-            )
-        })?;
-
-    if branch_name == original_branch {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "cannot delete checked-out branch '{}'; switch to another branch first",
-                branch_name
-            ),
-        ));
-    }
-
-    let graph = BranchGraph::new(&session.state);
-    let parent_branch_name = graph
-        .parent_branch_name(&node, &session.config.trunk_branch)
-        .ok_or_else(|| {
-            io::Error::other(format!(
-                "tracked parent for '{}' is missing from dagger",
-                branch_name
-            ))
-        })?;
-
-    if !git::branch_exists(&parent_branch_name)? {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("parent branch '{}' does not exist", parent_branch_name),
-        ));
-    }
-
-    let missing_descendants = graph.missing_local_descendants(node.id)?;
-    if !missing_descendants.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "tracked descendants of '{}' are missing locally: {}",
-                branch_name,
-                missing_descendants.join(", ")
-            ),
-        ));
-    }
-
-    let restack_actions = restack::plan_after_branch_detach(
-        &session.state,
-        node.id,
-        &node.branch_name,
-        &restack::RestackBaseTarget::local(&parent_branch_name),
-        &node.parent,
-    )?;
+    let plan = plan_delete_branch(&session, original_branch, &options.branch_name)?;
     let restack_outcome = workflow::execute_resumable_restack_operation(
         &mut session,
-        PendingOperationKind::BranchDelete(PendingBranchDeleteOperation {
-            original_branch: original_branch.clone(),
-            branch_name: branch_name.clone(),
-            parent_branch_name: parent_branch_name.clone(),
-            node_id: node.id,
-        }),
-        &restack_actions,
+        PendingOperationKind::BranchDelete(plan.completion.clone()),
+        &plan.restack_actions,
         &mut |_| Ok(()),
     )?;
 
-    if restack_outcome.paused {
-        return Ok(DeleteBranchOutcome {
-            status: restack_outcome.status,
-            branch_name,
-            parent_branch_name,
-            restacked_branches: restack_outcome.restacked_branches,
-            restored_original_branch: None,
-            failure_output: restack_outcome.failure_output,
-            paused: true,
-        });
-    }
-
-    complete_delete(
-        &mut session,
-        node.id,
-        &branch_name,
-        &parent_branch_name,
-        &original_branch,
-        restack_outcome.restacked_branches,
-        restack_outcome.status,
-    )
+    complete_or_pause_delete(&mut session, plan.completion, restack_outcome)
 }
 
 pub(crate) fn resume_delete_after_sync(
@@ -285,24 +232,61 @@ pub(crate) fn resume_delete_after_sync(
         &mut |_| Ok(()),
     )?;
 
+    complete_or_pause_delete(&mut session, payload, restack_outcome)
+}
+
+fn plan_delete_branch(
+    session: &StoreSession,
+    original_branch: String,
+    requested_branch_name: &str,
+) -> io::Result<DeleteBranchPlan> {
+    let branch_name = resolve_delete_branch_name(requested_branch_name)?;
+    ensure_branch_is_not_trunk(&branch_name, &session.config.trunk_branch)?;
+    ensure_local_branch_exists(
+        &branch_name,
+        format!("branch '{}' does not exist", branch_name),
+    )?;
+    ensure_branch_is_not_current(&branch_name, &original_branch)?;
+
+    let node = load_tracked_branch_by_name(&session.state, &branch_name)?;
+    let parent_branch_name =
+        resolve_tracked_parent_branch_name(&session.state, &session.config.trunk_branch, &node)?;
+
+    ensure_local_branch_exists(
+        &parent_branch_name,
+        format!("parent branch '{}' does not exist", parent_branch_name),
+    )?;
+    ensure_local_descendants_exist(&session.state, node.id, &branch_name)?;
+
+    Ok(DeleteBranchPlan {
+        completion: PendingBranchDeleteOperation {
+            original_branch,
+            branch_name,
+            parent_branch_name: parent_branch_name.clone(),
+            node_id: node.id,
+        },
+        restack_actions: restack::plan_after_branch_detach(
+            &session.state,
+            node.id,
+            &node.branch_name,
+            &restack::RestackBaseTarget::local(parent_branch_name),
+            &node.parent,
+        )?,
+    })
+}
+
+fn complete_or_pause_delete(
+    session: &mut StoreSession,
+    completion: PendingBranchDeleteOperation,
+    restack_outcome: workflow::ResumableRestackExecutionOutcome,
+) -> io::Result<DeleteBranchOutcome> {
     if restack_outcome.paused {
-        return Ok(DeleteBranchOutcome {
-            status: restack_outcome.status,
-            branch_name: payload.branch_name,
-            parent_branch_name: payload.parent_branch_name,
-            restacked_branches: restack_outcome.restacked_branches,
-            restored_original_branch: None,
-            failure_output: restack_outcome.failure_output,
-            paused: true,
-        });
+        return Ok(DeleteBranchOutcome::paused(completion, restack_outcome));
     }
 
     complete_delete(
-        &mut session,
-        payload.node_id,
-        &payload.branch_name,
-        &payload.parent_branch_name,
-        &payload.original_branch,
+        session,
+        &completion,
         restack_outcome.restacked_branches,
         restack_outcome.status,
     )
@@ -310,30 +294,19 @@ pub(crate) fn resume_delete_after_sync(
 
 fn complete_delete(
     session: &mut StoreSession,
-    node_id: Uuid,
-    branch_name: &str,
-    parent_branch_name: &str,
-    original_branch: &str,
+    completion: &PendingBranchDeleteOperation,
     restacked_branches: Vec<RestackPreview>,
     restack_status: ExitStatus,
 ) -> io::Result<DeleteBranchOutcome> {
-    let node = session
-        .state
-        .find_branch_by_id(node_id)
-        .cloned()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "tracked branch was not found"))?;
+    let node = load_tracked_branch_by_id(&session.state, completion.node_id)?;
 
     let delete_status = git::delete_branch_force(&node.branch_name)?;
     if !delete_status.success() {
-        return Ok(DeleteBranchOutcome {
-            status: delete_status,
-            branch_name: branch_name.to_string(),
-            parent_branch_name: parent_branch_name.to_string(),
+        return Ok(DeleteBranchOutcome::delete_failed(
+            completion,
+            delete_status,
             restacked_branches,
-            restored_original_branch: None,
-            failure_output: None,
-            paused: false,
-        });
+        ));
     }
 
     record_branch_archived(
@@ -343,32 +316,132 @@ fn complete_delete(
         BranchArchiveReason::DeletedByUser,
     )?;
 
-    let mut final_status = restack_status;
-    let mut restored_original_branch = None;
-    let mut failure_output = None;
-
-    if let Some(outcome) = workflow::restore_original_branch_if_needed(original_branch)? {
-        if outcome.status.success() {
-            restored_original_branch = Some(outcome.restored_branch);
-            final_status = outcome.status;
-        } else {
-            final_status = outcome.status;
-            failure_output = Some(format!(
-                "branch deleted, but failed to return to '{}'",
-                original_branch
-            ));
-        }
-    }
+    let restore_outcome =
+        restore_original_branch_after_delete(&completion.original_branch, restack_status)?;
 
     Ok(DeleteBranchOutcome {
-        status: final_status,
-        branch_name: branch_name.to_string(),
-        parent_branch_name: parent_branch_name.to_string(),
+        status: restore_outcome.status,
+        branch_name: completion.branch_name.clone(),
+        parent_branch_name: completion.parent_branch_name.clone(),
         restacked_branches,
-        restored_original_branch,
-        failure_output,
+        restored_original_branch: restore_outcome.restored_original_branch,
+        failure_output: restore_outcome.failure_output,
         paused: false,
     })
+}
+
+fn restore_original_branch_after_delete(
+    original_branch: &str,
+    default_status: ExitStatus,
+) -> io::Result<RestoreOriginalBranchOutcome> {
+    let Some(outcome) = workflow::restore_original_branch_if_needed(original_branch)? else {
+        return Ok(RestoreOriginalBranchOutcome {
+            status: default_status,
+            restored_original_branch: None,
+            failure_output: None,
+        });
+    };
+
+    if !outcome.status.success() {
+        return Ok(RestoreOriginalBranchOutcome {
+            status: outcome.status,
+            restored_original_branch: None,
+            failure_output: Some(format!(
+                "branch deleted, but failed to return to '{}'",
+                original_branch
+            )),
+        });
+    }
+
+    Ok(RestoreOriginalBranchOutcome {
+        status: outcome.status,
+        restored_original_branch: Some(outcome.restored_branch),
+        failure_output: None,
+    })
+}
+
+fn ensure_branch_is_not_trunk(branch_name: &str, trunk_branch: &str) -> io::Result<()> {
+    if branch_name != trunk_branch {
+        return Ok(());
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("cannot delete trunk branch '{}'", trunk_branch),
+    ))
+}
+
+fn ensure_branch_is_not_current(branch_name: &str, current_branch: &str) -> io::Result<()> {
+    if branch_name != current_branch {
+        return Ok(());
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("cannot delete checked-out branch '{branch_name}'; switch to another branch first"),
+    ))
+}
+
+fn ensure_local_branch_exists(branch_name: &str, not_found_message: String) -> io::Result<()> {
+    if git::branch_exists(branch_name)? {
+        return Ok(());
+    }
+
+    Err(io::Error::new(io::ErrorKind::NotFound, not_found_message))
+}
+
+fn ensure_local_descendants_exist(
+    state: &DaggerState,
+    node_id: Uuid,
+    branch_name: &str,
+) -> io::Result<()> {
+    let missing_descendants = BranchGraph::new(state).missing_local_descendants(node_id)?;
+    if missing_descendants.is_empty() {
+        return Ok(());
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!(
+            "tracked descendants of '{}' are missing locally: {}",
+            branch_name,
+            missing_descendants.join(", ")
+        ),
+    ))
+}
+
+fn load_tracked_branch_by_name(state: &DaggerState, branch_name: &str) -> io::Result<BranchNode> {
+    state
+        .find_branch_by_name(branch_name)
+        .cloned()
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("branch '{}' is not tracked by dagger", branch_name),
+            )
+        })
+}
+
+fn load_tracked_branch_by_id(state: &DaggerState, node_id: Uuid) -> io::Result<BranchNode> {
+    state
+        .find_branch_by_id(node_id)
+        .cloned()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "tracked branch was not found"))
+}
+
+fn resolve_tracked_parent_branch_name(
+    state: &DaggerState,
+    trunk_branch: &str,
+    node: &BranchNode,
+) -> io::Result<String> {
+    BranchGraph::new(state)
+        .parent_branch_name(node, trunk_branch)
+        .ok_or_else(|| {
+            io::Error::other(format!(
+                "tracked parent for '{}' is missing from dagger",
+                node.branch_name
+            ))
+        })
 }
 
 fn resolve_delete_branch_name(requested_branch_name: &str) -> io::Result<String> {

@@ -32,37 +32,54 @@ pub fn execute(args: BranchArgs) -> io::Result<CommandOutcome> {
     let options = BranchOptions::try_from(args.clone())?;
     let outcome = branch::run(&options)?;
 
-    match &outcome {
-        branch::BranchOutcome::Created(create_outcome) if create_outcome.status.success() => {
-            if let Some(node) = &create_outcome.created_node {
-                println!("Created and switched to '{}'.", node.branch_name);
-                println!();
-                println!(
-                    "{}",
-                    super::tree::render_branch_lineage(&create_outcome.lineage)
-                );
-            }
-        }
-        branch::BranchOutcome::Deleted(delete_outcome) if delete_outcome.status.success() => {
-            let rendered_tree =
-                super::tree::render_focused_context_tree(&delete_outcome.parent_branch_name, None)?;
-            let output = format_delete_success_output(delete_outcome, &rendered_tree);
-            if !output.is_empty() {
-                println!("{output}");
-            }
-        }
-        branch::BranchOutcome::Deleted(delete_outcome) if delete_outcome.paused => {
-            common::print_restack_pause_guidance(delete_outcome.failure_output.as_deref());
-        }
-        branch::BranchOutcome::Deleted(delete_outcome) => {
-            common::print_trimmed_stderr(delete_outcome.failure_output.as_deref());
-        }
-        branch::BranchOutcome::Created(_) => {}
-    }
+    print_branch_outcome(&outcome)?;
 
     Ok(CommandOutcome {
         status: outcome.status(),
     })
+}
+
+fn print_branch_outcome(outcome: &branch::BranchOutcome) -> io::Result<()> {
+    match outcome {
+        branch::BranchOutcome::Created(create_outcome) => print_create_outcome(create_outcome),
+        branch::BranchOutcome::Deleted(delete_outcome) => print_delete_outcome(delete_outcome),
+    }
+}
+
+fn print_create_outcome(outcome: &branch::CreateBranchOutcome) -> io::Result<()> {
+    if !outcome.status.success() {
+        return Ok(());
+    }
+
+    let Some(node) = &outcome.created_node else {
+        return Ok(());
+    };
+
+    println!("Created and switched to '{}'.", node.branch_name);
+    println!();
+    println!("{}", super::tree::render_branch_lineage(&outcome.lineage));
+
+    Ok(())
+}
+
+fn print_delete_outcome(outcome: &DeleteBranchOutcome) -> io::Result<()> {
+    if outcome.status.success() {
+        let rendered_tree =
+            super::tree::render_focused_context_tree(&outcome.parent_branch_name, None)?;
+        let output = format_delete_success_output(outcome, &rendered_tree);
+        if !output.is_empty() {
+            println!("{output}");
+        }
+        return Ok(());
+    }
+
+    if outcome.paused {
+        common::print_restack_pause_guidance(outcome.failure_output.as_deref());
+        return Ok(());
+    }
+
+    common::print_trimmed_stderr(outcome.failure_output.as_deref());
+    Ok(())
 }
 
 impl TryFrom<BranchArgs> for BranchOptions {
@@ -93,29 +110,29 @@ pub(crate) fn format_delete_success_output(
     outcome: &DeleteBranchOutcome,
     rendered_tree: &str,
 ) -> String {
-    let mut sections = Vec::new();
-    let mut summary_lines = vec![format!(
+    let mut sections = vec![format_delete_summary(outcome)];
+    sections.extend(
+        (!outcome.restacked_branches.is_empty())
+            .then(|| common::format_restacked_branches(&outcome.restacked_branches)),
+    );
+    sections.extend((!rendered_tree.trim().is_empty()).then(|| rendered_tree.to_string()));
+
+    common::join_sections(&sections)
+}
+
+fn format_delete_summary(outcome: &DeleteBranchOutcome) -> String {
+    let mut lines = vec![format!(
         "Deleted '{}'. It is no longer tracked by dagger.",
         outcome.branch_name
     )];
+    lines.extend(
+        outcome
+            .restored_original_branch
+            .as_ref()
+            .map(|branch| format!("Returned to '{}' after deleting.", branch)),
+    );
 
-    if let Some(original_branch) = &outcome.restored_original_branch {
-        summary_lines.push(format!("Returned to '{}' after deleting.", original_branch));
-    }
-
-    sections.push(summary_lines.join("\n"));
-
-    if !outcome.restacked_branches.is_empty() {
-        sections.push(common::format_restacked_branches(
-            &outcome.restacked_branches,
-        ));
-    }
-
-    if !rendered_tree.trim().is_empty() {
-        sections.push(rendered_tree.to_string());
-    }
-
-    common::join_sections(&sections)
+    lines.join("\n")
 }
 
 #[cfg(test)]
