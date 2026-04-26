@@ -13,7 +13,7 @@ use crate::core::store::{
     PendingSyncPhase, clear_operation, load_operation, open_initialized,
 };
 use crate::core::workflow;
-use crate::core::{adopt, commit, git, merge, orphan, reparent};
+use crate::core::{adopt, branch, commit, git, merge, orphan, reparent};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncOptions {
@@ -99,6 +99,7 @@ pub enum SyncEvent {
 pub enum SyncCompletion {
     Commit(commit::CommitOutcome),
     Adopt(adopt::AdoptOutcome),
+    BranchDelete(branch::DeleteBranchOutcome),
     Merge(merge::MergeResumeOutcome),
     Clean {
         trunk_branch: String,
@@ -266,6 +267,23 @@ where
             Ok(SyncOutcome {
                 status,
                 completion: Some(SyncCompletion::Adopt(outcome)),
+                failure_output,
+                paused,
+            })
+        }
+        PendingOperationKind::BranchDelete(payload) => {
+            let continue_output = git::continue_rebase()?;
+            if !continue_output.status.success() {
+                return Ok(paused_continue_outcome(continue_output));
+            }
+
+            let outcome = branch::resume_delete_after_sync(pending_operation, payload)?;
+            let status = outcome.status;
+            let failure_output = outcome.failure_output.clone();
+            let paused = outcome.paused;
+            Ok(SyncOutcome {
+                status,
+                completion: Some(SyncCompletion::BranchDelete(outcome)),
                 failure_output,
                 paused,
             })

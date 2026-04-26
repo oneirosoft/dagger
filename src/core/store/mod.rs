@@ -23,8 +23,9 @@ pub(crate) use types::{
     BranchAdoptedEvent, BranchArchiveReason, BranchArchivedEvent, BranchCreatedEvent,
     BranchDivergenceState, BranchNode, BranchPullRequestTrackedEvent,
     BranchPullRequestTrackedSource, BranchReparentedEvent, DaggerConfig, DaggerEvent, ParentRef,
-    PendingAdoptOperation, PendingCleanCandidate, PendingCleanCandidateKind, PendingCleanOperation,
-    PendingCommitEntry, PendingCommitOperation, PendingMergeOperation, PendingOperationKind,
-    PendingOperationState, PendingOrphanOperation, PendingReparentOperation, PendingSyncOperation,
-    PendingSyncPhase, TrackedPullRequest, now_unix_timestamp_secs,
+    PendingAdoptOperation, PendingBranchDeleteOperation, PendingCleanCandidate,
+    PendingCleanCandidateKind, PendingCleanOperation, PendingCommitEntry, PendingCommitOperation,
+    PendingMergeOperation, PendingOperationKind, PendingOperationState, PendingOrphanOperation,
+    PendingReparentOperation, PendingSyncOperation, PendingSyncPhase, TrackedPullRequest,
+    now_unix_timestamp_secs,
 };
