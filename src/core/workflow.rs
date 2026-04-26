@@ -1,7 +1,7 @@
 use std::io;
 use std::process::ExitStatus;
 
-use crate::core::git::{self, RebaseProgress, RepoContext};
+use crate::core::git::{self, GitCommandOutput, RebaseProgress, RepoContext};
 use crate::core::restack::{self, RestackAction, RestackPreview};
 use crate::core::store::fs::DaggerPaths;
 use crate::core::store::session::StoreSession;
@@ -113,6 +113,21 @@ pub(crate) fn restore_original_branch_if_needed(
         status,
         restored_branch: original_branch.to_string(),
     }))
+}
+
+pub(crate) fn pull_branch_with_rebase(
+    target_branch: &str,
+    remote_name: &str,
+) -> io::Result<GitCommandOutput> {
+    let checkout = checkout_branch_if_needed(target_branch)?;
+    if !checkout.status.success() {
+        return Err(io::Error::other(format!(
+            "failed to switch to '{}' before pulling from '{}'",
+            target_branch, remote_name
+        )));
+    }
+
+    git::pull_branch_with_rebase(remote_name, target_branch)
 }
 
 pub(crate) fn execute_resumable_restack_operation<F>(

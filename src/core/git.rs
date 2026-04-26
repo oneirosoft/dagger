@@ -389,8 +389,12 @@ pub fn branch_push_target_if_needed(branch_name: &str) -> io::Result<Option<Bran
     Ok(Some(target))
 }
 
+pub fn branch_remote_name(branch_name: &str) -> io::Result<Option<String>> {
+    resolve_push_remote_name(branch_name)
+}
+
 pub fn branch_push_target(branch_name: &str) -> io::Result<Option<BranchPushTarget>> {
-    let Some(remote_name) = resolve_push_remote_name(branch_name)? else {
+    let Some(remote_name) = branch_remote_name(branch_name)? else {
         return Ok(None);
     };
 
@@ -458,6 +462,21 @@ pub fn fetch_remote(remote_name: &str) -> io::Result<GitCommandOutput> {
         .output()?;
 
     output_to_git_command_output(output)
+}
+
+pub fn pull_branch_with_rebase(
+    remote_name: &str,
+    branch_name: &str,
+) -> io::Result<GitCommandOutput> {
+    let output = Command::new("git")
+        .args(["pull", "--rebase", remote_name, branch_name])
+        .output()?;
+
+    output_to_git_command_output(output)
+}
+
+pub fn abort_rebase() -> io::Result<GitCommandOutput> {
+    run_git_capture_output(["rebase", "--abort"])
 }
 
 pub fn remote_tracking_ref_name(remote_name: &str, branch_name: &str) -> String {
