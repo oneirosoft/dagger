@@ -41,6 +41,9 @@ jobs:
   audit:
     name: Security Audit
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
