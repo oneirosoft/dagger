@@ -1,0 +1,45 @@
+# CodeRabbit configuration
+# https://docs.coderabbit.ai/guides/configure-coderabbit
+language: en-US
+reviews:
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+  path_filters:
+    - "!.claude/**"
+  path_instructions:
+    - path: "src/core/store/**"
+      instructions: >
+        Pay close attention to atomicity, error handling on I/O operations,
+        and state consistency. These files manage persistent state that must
+        survive crashes.
+    - path: "src/core/git.rs"
+      instructions: >
+        Review for command injection risks in git subprocess invocations.
+        Ensure all user-provided branch names are passed as separate args,
+        never interpolated into shell strings.
+    - path: "src/cli/**"
+      instructions: >
+        Verify CLI layer is a thin adapter. Business logic should live in
+        src/core/ instead. Check that error messages are user-friendly.
+    - path: "**/*.rs"
+      instructions: >
+        Focus on Rust best practices, proper error handling, and security
+        considerations. Flag any potential issues with unsafe code or
+        subprocess command injection.
+    - path: "**/*.yml"
+      instructions: >
+        Focus on YAML best practices, correct indentation, valid syntax,
+        and consistent structure. Flag any schema issues or misconfigurations.
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  tools:
+    clippy:
+      enabled: true
+    shellcheck:
+      enabled: true
+chat:
+  auto_reply: true
